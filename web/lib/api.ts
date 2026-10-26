@@ -1,0 +1,145 @@
+import type { Attachment } from './types';
+
+export const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_SERVER_URL ||
+  'http://localhost:4000'
+).replace(/\/$/, '');
+
+const TOKEN_KEY = 'relay.token';
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export function readToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writeToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) window.localStorage.setItem(TOKEN_KEY, token);
+    else window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable — session lives in memory only */
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  const token = readToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers, cache: 'no-store' });
+  } catch {
+    throw new ApiError('Cannot reach the Relay server. Is it running on port 4000?', 0);
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json')
+    ? await response.json().catch(() => null)
+    : null;
+
+  if (!response.ok) {
+    throw new ApiError(
+      (payload && (payload.error as string)) || `Request failed (${response.status}).`,
+      response.status,
+    );
+  }
+
+  return payload as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+};
+
+export function mediaUrl(path: string | null | undefined): string {
+  if (!path) return '';
+  if (/^(https?:|blob:|data:)/i.test(path)) return path;
+  return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+interface UploadOptions {
+  filename: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+export function uploadAttachment(
+  file: Blob,
+  options: UploadOptions,
+  onProgress?: (percent: number) => void,
+): Promise<Attachment> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', file, options.filename);
+    if (options.duration !== undefined) form.append('duration', String(options.duration));
+    if (options.width !== undefined) form.append('width', String(options.width));
+    if (options.height !== undefined) form.append('height', String(options.height));
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_URL}/api/uploads`);
+
+    const token = readToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    };
+
+    xhr.onerror = () => reject(new ApiError('Upload failed — check the server connection.', 0));
+    xhr.onabort = () => reject(new ApiError('Upload cancelled.', 0));
+
+    xhr.onload = () => {
+      let payload: { attachment?: Attachment; error?: string } | null = null;
+      try {
+        payload = JSON.parse(xhr.responseText || '{}');
+      } catch {
+        payload = null;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300 && payload?.attachment) {
+        onProgress?.(100);
+        resolve(payload.attachment);
+        return;
+      }
+
+      reject(
+        new ApiError(
+          payload?.error || `Upload failed (${xhr.status}).`,
+          xhr.status,
+        ),
+      );
+    };
+
+    xhr.send(form);
+  });
+}

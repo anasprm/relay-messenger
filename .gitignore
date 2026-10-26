@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+dist/
+
+# Runtime data — regenerated from seed on first boot
+server/data/
+server/uploads/
+
+.env
+.env.local
+*.log
+
+.DS_Store
+Thumbs.db
