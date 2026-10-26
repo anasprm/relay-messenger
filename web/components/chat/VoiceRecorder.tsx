@@ -146,7 +146,7 @@ export function VoiceRecorder({
         setStatus('error');
         setError(
           name === 'NotAllowedError'
-            ? 'Microphone access was denied. Allow it in your browser to record voice notes.'
+            ? 'Microphone access is blocked. Allow it from your browser\'s site permissions, then reopen the recorder.'
             : name === 'NotFoundError'
               ? 'No microphone was found on this device.'
               : 'Could not start the microphone.',

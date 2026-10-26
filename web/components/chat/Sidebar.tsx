@@ -5,6 +5,7 @@ import { LogOut, MessageSquarePlus, Search, Wifi, WifiOff, X } from 'lucide-reac
 import { Avatar } from '@/components/ui/Avatar';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { UiStyleToggle } from '@/components/ui/UiStyleToggle';
 import { cn } from '@/lib/utils';
 import type { Conversation, User } from '@/lib/types';
 import { ConversationRow } from './ConversationRow';
@@ -55,15 +56,18 @@ export function Sidebar({
     <aside className={cn('flex h-full min-h-0 flex-col bg-panel', className)}>
       <div className="flex h-[68px] shrink-0 items-center justify-between gap-2 border-b border-line px-4">
         <Logo />
-        <button
-          type="button"
-          onClick={() => onNewChat()}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-panel text-accent transition-colors hover:border-accent/40 hover:bg-accent-soft"
-          aria-label="New conversation"
-          title="New conversation"
-        >
-          <MessageSquarePlus size={17} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <UiStyleToggle compact />
+          <button
+            type="button"
+            onClick={() => onNewChat()}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-panel text-accent transition-colors hover:border-accent/40 hover:bg-accent-soft"
+            aria-label="New conversation"
+            title="New conversation"
+          >
+            <MessageSquarePlus size={17} />
+          </button>
+        </div>
       </div>
 
       <div className="shrink-0 space-y-3 px-4 pb-3 pt-4">

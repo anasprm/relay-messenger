@@ -20,6 +20,7 @@ import { errorMessage, useAuth } from '@/lib/AuthProvider';
 import { cn } from '@/lib/utils';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { UiStyleToggle } from '@/components/ui/UiStyleToggle';
 import { Avatar } from '@/components/ui/Avatar';
 import { Splash } from '@/components/ui/Splash';
 
@@ -176,8 +177,9 @@ export function AuthScreen({ mode }: AuthScreenProps) {
             <div className="lg:hidden">
               <Logo />
             </div>
-            <div className="ml-auto">
-              <ThemeToggle />
+            <div className="ml-auto flex items-center gap-2">
+              <UiStyleToggle compact />
+              <ThemeToggle compact />
             </div>
           </div>
 

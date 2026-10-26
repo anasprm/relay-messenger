@@ -20,10 +20,29 @@ let storageBucket = null;
 let storageChecked = false;
 let storageError = null;
 
+function parseServiceAccount(raw, label) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
+      throw new Error('missing project_id, client_email, or private_key');
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(`Invalid ${label}: ${error.message}`);
+  }
+}
+
 function resolveCredential() {
+  const inlineBase64 = (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '').replace(/\s+/g, '');
+  if (inlineBase64) {
+    const decoded = Buffer.from(inlineBase64, 'base64').toString('utf8');
+    const parsed = parseServiceAccount(decoded, 'FIREBASE_SERVICE_ACCOUNT_BASE64');
+    return { credential: cert(parsed), projectId: parsed.project_id, databaseId: DATABASE_ID };
+  }
+
   const inline = (process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
   if (inline.startsWith('{')) {
-    const parsed = JSON.parse(inline);
+    const parsed = parseServiceAccount(inline, 'FIREBASE_SERVICE_ACCOUNT');
     return { credential: cert(parsed), projectId: parsed.project_id, databaseId: DATABASE_ID };
   }
 
@@ -33,7 +52,7 @@ function resolveCredential() {
     (fs.existsSync(CREDENTIAL_FILE) ? CREDENTIAL_FILE : '');
 
   if (credentialPath && fs.existsSync(credentialPath)) {
-    const parsed = JSON.parse(fs.readFileSync(credentialPath, 'utf8'));
+    const parsed = parseServiceAccount(fs.readFileSync(credentialPath, 'utf8'), credentialPath);
     return { credential: cert(parsed), projectId: parsed.project_id, databaseId: DATABASE_ID };
   }
 
@@ -59,7 +78,15 @@ function resolveCredential() {
 export function getFirebase() {
   if (firebase || firebaseError) return firebase;
 
-  const resolved = resolveCredential();
+  let resolved;
+  try {
+    resolved = resolveCredential();
+  } catch (error) {
+    firebaseError = error;
+    console.warn(`[firebase] Credential error: ${error.message}`);
+    return null;
+  }
+
   if (!resolved) {
     firebaseError = new Error('No Firebase credentials configured');
     return null;

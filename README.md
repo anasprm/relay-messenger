@@ -2,6 +2,8 @@
 
 Relay is a realtime direct-messaging workspace with a minimal, enterprise-focused interface. It ships as a small monorepo: a Next.js App Router frontend and an Express + Socket.io backend that persists to **Cloud Firestore**, with Firebase Storage for uploaded media and a local fallback when no bucket is configured.
 
+The public site opens on a marketing welcome page, then routes signed-in visitors straight to their threads. The interface ships in two styles — **Official** (the polished default) and **Minimal** (a flatter, quieter variant) — independent of the light/dark theme.
+
 Messages, reactions, presence, typing indicators, uploads, and WebRTC call signalling are realtime. Privacy controls — **anonymity** and **vanish mode** — are enforced on the server.
 
 ---
@@ -65,7 +67,11 @@ npm start
 - Read state and unread counts per conversation.
 - Live presence and typing indicators over Socket.io.
 - Date separators, grouped bubbles, message skeletons, and empty states.
-- Light and dark themes, persisted in `localStorage`.
+
+### Interface
+- Marketing welcome page at `/` with product preview, feature grid, privacy explainer, and call to action. Signed-in visitors are redirected to `/chat`.
+- **Official** and **Minimal** UI styles, switched from the landing header, the auth screen, or the chat sidebar. The choice persists in `localStorage` under `relay.ui`.
+- Light and dark themes, persisted in `localStorage` under `relay.theme`. Theme and UI style are independent.
 
 ### Media
 - **Voice notes** recorded in-browser with `MediaRecorder` and a live waveform.
@@ -114,8 +120,9 @@ cp web/.env.example web/.env.local
 | `CLIENT_ORIGIN` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated CORS origins |
 | `SESSION_SECRET` | generated in `server/data/.secret` | HMAC signing secret; set for stable sessions across data resets |
 | `FIREBASE_SERVICE_ACCOUNT` | `server/data/firebase-service-account.json` | Path to a service-account JSON file, or the JSON itself on one line |
+| `FIREBASE_SERVICE_ACCOUNT_BASE64` | unset | The service-account JSON encoded as base64; takes precedence and suits single-line secret fields |
 | `FIREBASE_PROJECT_ID` | from the service account | Firebase project ID |
-| `FIREBASE_FIRESTORE_DATABASE` | `default` | Firestore database ID |
+| `FIREBASE_FIRESTORE_DATABASE` | `default` | Firestore database ID (literal `default`, not `(default)`) |
 | `FIREBASE_STORAGE_BUCKET` | unset | Storage bucket name; uploads use local disk while unset |
 
 ### Web (`web/.env.local`)
@@ -123,6 +130,18 @@ cp web/.env.example web/.env.local
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | API base URL used by REST and Socket.io clients |
+
+---
+
+## Deployment
+
+A public deployment uses **Vercel** for the Next.js web app and **Render** for the Express + Socket.io API, with Firestore remaining on Firebase. No Blaze plan is required.
+
+- `web/vercel.json` — Vercel build configuration for the workspace.
+- `render.yaml` — Render blueprint for the free Node web service.
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** — step-by-step setup, environment variables, verification, and troubleshooting.
+
+Short version: deploy the API first, copy its URL into Vercel as `NEXT_PUBLIC_API_URL`, then set the Vercel domain on Render as `CLIENT_ORIGIN`.
 
 ---
 
@@ -137,7 +156,7 @@ Relay is connected to the Firebase project **`relay-messenger-anasprm`** (Firest
 
 ### Setup
 
-1. Create or download a service-account key from **Firebase Console → Project settings → Service accounts** and save it to `server/data/firebase-service-account.json`. Alternatively set `FIREBASE_SERVICE_ACCOUNT` to its path (or to the JSON itself).
+1. Create or download a service-account key from **Firebase Console → Project settings → Service accounts** and save it to `server/data/firebase-service-account.json`. Alternatively set `FIREBASE_SERVICE_ACCOUNT` to its path (or to the JSON itself), or set `FIREBASE_SERVICE_ACCOUNT_BASE64` to the file encoded as base64 — useful on hosts that only accept single-line secrets.
 2. Grant the service account `roles/datastore.user` for Firestore and `roles/storage.objectAdmin` for Storage.
 3. Start the API and check `/api/health` — it reports `database.backend` and `firebase.storage`.
 4. Deploy security rules with `npx firebase-tools deploy --only firestore:rules`.
@@ -157,6 +176,8 @@ New Cloud Storage buckets require the **Blaze** billing plan. Until billing is e
 ├── .firebaserc               # default Firebase project
 ├── firestore.rules           # deny all direct client access
 ├── storage.rules             # deny all direct client access
+├── render.yaml               # Render blueprint for the API
+├── DEPLOYMENT.md             # Vercel + Render + Firebase deployment guide
 ├── server/
 │   ├── src/
 │   │   ├── index.js          # Express app, static uploads, HTTP + Socket.io server
@@ -175,8 +196,10 @@ New Cloud Storage buckets require the **Blaze** billing plan. Until billing is e
     ├── components/
     │   ├── auth/             # sign-in / registration experience
     │   ├── chat/             # sidebar, thread, composer, bubbles, recorders, calls
-    │   └── ui/               # avatars, modal, theme toggle, splash, logo
-    └── lib/                  # API client, auth, sockets, WebRTC, theme, toasts
+    │   ├── marketing/        # public welcome page
+    │   └── ui/               # avatars, modal, theme + UI style toggles, splash, logo
+    ├── lib/                  # API client, auth, sockets, WebRTC, theme, UI style, toasts
+    └── vercel.json           # Vercel build configuration
 ```
 
 ---
@@ -223,6 +246,7 @@ Both participants join per-user rooms; conversation access is checked before bro
 ## Notes and limitations
 
 - Relay uses Firestore for persistence but keeps a single-process in-memory cache; it is not yet designed for multiple API instances without a shared pub/sub layer.
+- Session tokens are stored in `localStorage` and sent as bearer headers, so they are readable by any script that manages to run on the origin. Serve the site over HTTPS and keep third-party scripts off the page.
 - Sessions are stateless; signing out clears the client token but does not maintain a server-side revocation list.
 - WebRTC uses public STUN only. Add a TURN service for reliable calls across restrictive NATs or corporate networks.
 - Usernames are unique and matched case-insensitively. Anonymity masking happens on serialization, so raw sender IDs are not exposed to the other participant.

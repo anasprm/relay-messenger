@@ -14,7 +14,7 @@ export function Logo({
     <div className={cn('flex items-center gap-3', className)}>
       <span
         className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-white shadow-[0_8px_24px_-10px_rgba(79,70,229,0.9)]',
+          'logo-mark flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-white shadow-[0_8px_24px_-10px_rgba(79,70,229,0.9)]',
         )}
       >
         <MessageSquareText size={20} strokeWidth={2.2} />

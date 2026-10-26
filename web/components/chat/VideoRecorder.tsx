@@ -114,7 +114,7 @@ export function VideoRecorder({ open, onClose, onSend, busy = false }: VideoReco
         setStatus('error');
         setError(
           name === 'NotAllowedError'
-            ? 'Camera or microphone access was denied. Allow it to record a video message.'
+            ? 'Camera or microphone access is blocked. Allow it from your browser\'s site permissions, then reopen the recorder.'
             : name === 'NotFoundError'
               ? 'No camera was found on this device.'
               : 'Could not start the camera.',

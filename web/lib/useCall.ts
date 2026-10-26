@@ -47,10 +47,42 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
-function mediaErrorMessage(error: unknown): string {
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
+const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  facingMode: 'user',
+};
+
+type PermissionNameState = 'granted' | 'denied' | 'prompt' | 'unknown';
+
+/** Chromium exposes microphone state; other browsers may not, so never rely on it alone. */
+async function microphonePermission(): Promise<PermissionNameState> {
+  try {
+    if (!navigator.permissions?.query) return 'unknown';
+    const status = await navigator.permissions.query({
+      name: 'microphone' as PermissionName,
+    });
+    return status.state as PermissionNameState;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function blockedMessage(kind: CallKind): string {
+  const target = kind === 'video' ? 'Camera and microphone access is' : 'Microphone access is';
+  return `${target} blocked for this site. Allow it from your browser's site permissions, then start the call again.`;
+}
+
+function mediaErrorMessage(error: unknown, kind: CallKind): string {
   const name = error instanceof DOMException ? error.name : '';
   if (name === 'NotAllowedError' || name === 'SecurityError') {
-    return 'Camera and microphone permission was denied.';
+    return blockedMessage(kind);
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
     return 'No microphone or camera was found on this device.';
@@ -61,21 +93,48 @@ function mediaErrorMessage(error: unknown): string {
   return 'Could not start the call. Please try again.';
 }
 
-async function acquireMedia(kind: CallKind): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getUserMedia) {
+function cameraFallbackNotice(name: string): string {
+  if (name === 'NotFoundError') {
+    return 'No camera was found, so the call started with audio only.';
+  }
+  if (name === 'NotReadableError') {
+    return 'Your camera is busy in another app, so the call started with audio only.';
+  }
+  return 'Camera access is unavailable, so the call started with audio only.';
+}
+
+/**
+ * Requests media inside the click gesture. A separate camera request is only made
+ * after a failed combined request, so a blocked camera never prevents an audio call.
+ */
+async function acquireMedia(
+  kind: CallKind,
+  onNotice?: (message: string) => void,
+): Promise<MediaStream> {
+  const media = navigator.mediaDevices;
+  if (!media?.getUserMedia) {
     throw new Error('Calls require a secure context (https or localhost).');
   }
-  return navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-    video:
-      kind === 'video'
-        ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
-        : false,
-  });
+
+  if (kind === 'audio') {
+    return media.getUserMedia({ audio: AUDIO_CONSTRAINTS, video: false });
+  }
+
+  try {
+    return await media.getUserMedia({ audio: AUDIO_CONSTRAINTS, video: VIDEO_CONSTRAINTS });
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : '';
+    const cameraFailure =
+      name === 'NotAllowedError' || name === 'NotFoundError' || name === 'NotReadableError';
+    if (!cameraFailure) throw error;
+
+    // If the microphone itself is blocked there is nothing to fall back to.
+    if ((await microphonePermission()) === 'denied') throw error;
+
+    const stream = await media.getUserMedia({ audio: AUDIO_CONSTRAINTS, video: false });
+    onNotice?.(cameraFallbackNotice(name));
+    return stream;
+  }
 }
 
 export function useCall({ socket, onError, onInfo }: UseCallOptions) {
@@ -183,9 +242,13 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
       }));
 
       try {
-        const stream = await acquireMedia(kind);
+        const stream = await acquireMedia(kind, (message) => onInfoRef.current?.(message));
         localStreamRef.current = stream;
         setLocalStream(stream);
+        updateCall((previous) => ({
+          ...previous,
+          cameraOn: stream.getVideoTracks().length > 0,
+        }));
 
         const pc = buildPeer(conversation.other.id, conversation.id);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -202,10 +265,10 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
       } catch (error) {
         onErrorRef.current?.(
           error instanceof DOMException
-            ? mediaErrorMessage(error)
+            ? mediaErrorMessage(error, kind)
             : error instanceof Error
               ? error.message
-              : mediaErrorMessage(error),
+              : mediaErrorMessage(error, kind),
         );
         cleanup();
       }
@@ -220,7 +283,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
     updateCall((previous) => ({ ...previous, status: 'connecting', error: null }));
 
     try {
-      const stream = await acquireMedia(incoming.kind);
+      const stream = await acquireMedia(incoming.kind, (message) => onInfoRef.current?.(message));
       localStreamRef.current = stream;
       setLocalStream(stream);
 
@@ -252,7 +315,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
         ...previous,
         status: 'active',
         startedAt: Date.now(),
-        cameraOn: incoming.kind === 'video',
+        cameraOn: stream.getVideoTracks().length > 0,
       }));
     } catch (error) {
       socket.emit('call:decline', {
@@ -262,10 +325,10 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
       });
       onErrorRef.current?.(
         error instanceof DOMException
-          ? mediaErrorMessage(error)
+          ? mediaErrorMessage(error, incoming.kind)
           : error instanceof Error
             ? error.message
-            : mediaErrorMessage(error),
+            : mediaErrorMessage(error, incoming.kind),
       );
       cleanup();
     }

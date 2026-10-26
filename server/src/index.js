@@ -7,6 +7,7 @@ import { CLIENT_ORIGINS, PORT, UPLOAD_DIR } from './config.js';
 import { dbStatus, getDb, initDb } from './db.js';
 import { firebaseStatus, probeStorage } from './firebase.js';
 import { registerRealtime } from './realtime.js';
+import { ensureSeedAssets } from './seed.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
@@ -99,6 +100,7 @@ function shutdown(signal) {
 
 async function main() {
   await initDb();
+  ensureSeedAssets();
   await probeStorage();
 
   registerRealtime(io);

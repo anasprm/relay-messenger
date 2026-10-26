@@ -59,6 +59,87 @@
   --success: #34d399;
 }
 
+/* Minimal interface style — neutral, flat, and quiet. Official stays the default. */
+html[data-ui="minimal"] {
+  --app: #f7f7f8;
+  --panel: #ffffff;
+  --panel-2: #fafafa;
+  --elevated: #ffffff;
+  --line: #e7e7e9;
+  --line-strong: #d4d4d8;
+  --ink: #18181b;
+  --muted: #6b7280;
+  --faint: #a1a1aa;
+  --accent: #334155;
+  --accent-hover: #1f2937;
+  --accent-soft: #eef1f4;
+  --bubble: #ffffff;
+  --danger: #b91c1c;
+  --success: #15803d;
+}
+
+html[data-ui="minimal"].dark {
+  --app: #0a0a0b;
+  --panel: #101012;
+  --panel-2: #151517;
+  --elevated: #18181b;
+  --line: #26262a;
+  --line-strong: #38383f;
+  --ink: #f4f4f5;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --accent: #475569;
+  --accent-hover: #64748b;
+  --accent-soft: #1b1d22;
+  --bubble: #141417;
+  --danger: #f87171;
+  --success: #34d399;
+}
+
+html[data-ui="minimal"] .ui-decor,
+html[data-ui="minimal"] .brand-grid {
+  display: none;
+}
+
+html[data-ui="minimal"] .vanish-canvas {
+  background-image: none;
+}
+
+html[data-ui="minimal"] .logo-mark {
+  background-image: none;
+  background-color: var(--accent);
+  box-shadow: none;
+}
+
+html[data-ui="minimal"] .rounded-md {
+  border-radius: 0.25rem;
+}
+
+html[data-ui="minimal"] .rounded-lg {
+  border-radius: 0.375rem;
+}
+
+html[data-ui="minimal"] .rounded-xl {
+  border-radius: 0.5rem;
+}
+
+html[data-ui="minimal"] .rounded-2xl {
+  border-radius: 0.75rem;
+}
+
+html[data-ui="minimal"] .rounded-3xl {
+  border-radius: 1rem;
+}
+
+html[data-ui="minimal"] .shadow-sm,
+html[data-ui="minimal"] .shadow,
+html[data-ui="minimal"] .shadow-md,
+html[data-ui="minimal"] .shadow-lg,
+html[data-ui="minimal"] .shadow-xl,
+html[data-ui="minimal"] .shadow-2xl {
+  box-shadow: none;
+}
+
 @layer base {
   * {
     border-color: var(--line);

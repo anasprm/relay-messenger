@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: relay-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: npm ci
+    startCommand: npm run start:server
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.1"
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_PROJECT_ID
+        value: relay-messenger-anasprm
+      - key: FIREBASE_FIRESTORE_DATABASE
+        value: default
+      # Paste the base64 service-account key in the Render dashboard.
+      - key: FIREBASE_SERVICE_ACCOUNT_BASE64
+        sync: false
+      # Set to the Vercel production URL after the web app is deployed.
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

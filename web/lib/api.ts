@@ -50,7 +50,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${API_URL}${path}`, { ...init, headers, cache: 'no-store' });
   } catch {
-    throw new ApiError('Cannot reach the Relay server. Is it running on port 4000?', 0);
+    throw new ApiError(
+      'Cannot reach the Relay server. Check your connection and try again.',
+      0,
+    );
   }
 
   if (response.status === 204) return undefined as T;

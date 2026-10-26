@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/lib/AuthProvider';
 import { ThemeProvider } from '@/lib/ThemeProvider';
+import { UiStyleProvider } from '@/lib/UiStyleProvider';
 import { ToastProvider } from '@/lib/ToastProvider';
 
 export const metadata: Metadata = {
@@ -31,6 +32,8 @@ const themeScript = `
     var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     if (dark) document.documentElement.classList.add('dark');
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    var ui = localStorage.getItem('relay.ui');
+    document.documentElement.dataset.ui = ui === 'minimal' ? 'minimal' : 'official';
   } catch (error) {}
 })();
 `;
@@ -43,9 +46,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-dvh bg-app text-ink antialiased">
         <ThemeProvider>
-          <AuthProvider>
-            <ToastProvider>{children}</ToastProvider>
-          </AuthProvider>
+          <UiStyleProvider>
+            <AuthProvider>
+              <ToastProvider>{children}</ToastProvider>
+            </AuthProvider>
+          </UiStyleProvider>
         </ThemeProvider>
       </body>
     </html>
