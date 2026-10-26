@@ -8,11 +8,22 @@ export function inferKind(mime = '') {
 }
 
 export function isSafeUploadUrl(url) {
-  return (
-    typeof url === 'string' &&
-    /^\/uploads\/[A-Za-z0-9._\-/]+$/.test(url) &&
-    !url.includes('..')
-  );
+  if (typeof url !== 'string' || !url) return false;
+
+  if (/^\/uploads\/[A-Za-z0-9._\-/]+$/.test(url)) {
+    return !url.includes('..');
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password) return false;
+    if (parsed.hostname !== 'firebasestorage.googleapis.com') return false;
+    if (!parsed.pathname.startsWith('/v0/b/')) return false;
+    return !parsed.pathname.includes('..');
+  } catch {
+    return false;
+  }
 }
 
 export function sanitizeText(value, max = 4000) {

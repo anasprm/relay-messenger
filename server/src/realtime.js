@@ -1,4 +1,4 @@
-import { findConversation, findUserById, saveDb } from './db.js';
+import { findConversation, findUserById, persistUser } from './db.js';
 import { verifyToken } from './auth.js';
 import * as presence from './presence.js';
 import { publicUser, serializeMessage } from './serializers.js';
@@ -78,7 +78,9 @@ export function registerRealtime(io) {
 
     if (becameOnline) {
       user.lastSeen = new Date().toISOString();
-      saveDb();
+      persistUser(user).catch((error) => {
+        console.warn(`[realtime] Could not persist presence: ${error.message}`);
+      });
       io.emit('presence:update', {
         userId: user.id,
         online: true,
@@ -151,14 +153,18 @@ export function registerRealtime(io) {
       });
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       const wentOffline = presence.removeSocket(user.id, socket.id);
       if (!wentOffline) return;
 
       const dbUser = findUserById(user.id);
       if (dbUser) {
         dbUser.lastSeen = new Date().toISOString();
-        saveDb();
+        try {
+          await persistUser(dbUser);
+        } catch (error) {
+          console.warn(`[realtime] Could not persist last seen: ${error.message}`);
+        }
       }
       io.emit('presence:update', {
         userId: user.id,

@@ -1,6 +1,6 @@
 # Relay
 
-Relay is a realtime direct-messaging workspace with a minimal, enterprise-focused interface. It ships as a small monorepo: a Next.js App Router frontend and an Express + Socket.io backend with a persisted mock database.
+Relay is a realtime direct-messaging workspace with a minimal, enterprise-focused interface. It ships as a small monorepo: a Next.js App Router frontend and an Express + Socket.io backend that persists to **Cloud Firestore**, with Firebase Storage for uploaded media and a local fallback when no bucket is configured.
 
 Messages, reactions, presence, typing indicators, uploads, and WebRTC call signalling are realtime. Privacy controls — **anonymity** and **vanish mode** — are enforced on the server.
 
@@ -19,7 +19,7 @@ npm run dev
 - API + Socket.io: http://localhost:4000
 - Health check: http://localhost:4000/api/health
 
-The first API boot seeds `server/data/db.json` with demo users, conversations, messages, and sample media. No external database is required.
+The first API boot hydrates an in-memory cache from Firestore and seeds the database with demo users, conversations, messages, and sample media when the `users` collection is empty. If Firebase credentials are absent, it falls back to the local JSON snapshot at `server/data/db.json`. No Firebase SDK is needed in the browser.
 
 ### Demo accounts
 
@@ -71,7 +71,7 @@ npm start
 - **Voice notes** recorded in-browser with `MediaRecorder` and a live waveform.
 - **Video notes** recorded from the camera with a preview and duration.
 - **File and image attachments** with upload progress, inline image previews, download links, size metadata, and a lightbox for images.
-- 30 MB upload limit; files are served from `server/uploads`.
+- 30 MB upload limit. Files go to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is configured, and otherwise fall back to `server/uploads`.
 
 ### Privacy controls
 - **Anonymity mode** (per user, per thread): the sender's identity is replaced **server-side** before the message is sent to the other participant. The receiver sees `Anonymous Operator`, a null sender ID, and no profile link. The sender still sees their own message normally.
@@ -113,6 +113,10 @@ cp web/.env.example web/.env.local
 | `PUBLIC_URL` | `http://localhost:4000` | Base URL used for uploaded media links |
 | `CLIENT_ORIGIN` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated CORS origins |
 | `SESSION_SECRET` | generated in `server/data/.secret` | HMAC signing secret; set for stable sessions across data resets |
+| `FIREBASE_SERVICE_ACCOUNT` | `server/data/firebase-service-account.json` | Path to a service-account JSON file, or the JSON itself on one line |
+| `FIREBASE_PROJECT_ID` | from the service account | Firebase project ID |
+| `FIREBASE_FIRESTORE_DATABASE` | `default` | Firestore database ID |
+| `FIREBASE_STORAGE_BUCKET` | unset | Storage bucket name; uploads use local disk while unset |
 
 ### Web (`web/.env.local`)
 
@@ -122,22 +126,50 @@ cp web/.env.example web/.env.local
 
 ---
 
+## Firebase
+
+Relay is connected to the Firebase project **`relay-messenger-anasprm`** (Firestore database `default`, region `asia-south1`).
+
+- The Express API talks to Firebase only through the **Admin SDK**. No Firebase credentials or client SDK are shipped to the browser.
+- `users`, `conversations`, and `messages` live in Firestore. The API keeps an in-memory cache for synchronous serializers and Socket.io fan-out, and writes every mutation back to Firestore.
+- `firestore.rules` and `storage.rules` deny all direct client access. The Admin SDK bypasses rules, so the API remains the only data path.
+- On boot, an empty `users` collection is seeded from `server/src/seed.js`. If credentials are missing or Firestore is unreachable, the API logs a warning and keeps working from `server/data/db.json`.
+
+### Setup
+
+1. Create or download a service-account key from **Firebase Console → Project settings → Service accounts** and save it to `server/data/firebase-service-account.json`. Alternatively set `FIREBASE_SERVICE_ACCOUNT` to its path (or to the JSON itself).
+2. Grant the service account `roles/datastore.user` for Firestore and `roles/storage.objectAdmin` for Storage.
+3. Start the API and check `/api/health` — it reports `database.backend` and `firebase.storage`.
+4. Deploy security rules with `npx firebase-tools deploy --only firestore:rules`.
+
+### Storage caveat
+
+New Cloud Storage buckets require the **Blaze** billing plan. Until billing is enabled, leave `FIREBASE_STORAGE_BUCKET` unset: uploads are written to `server/uploads` and served by the API. The client upload and message flow is identical either way; once a bucket exists, set `FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app` and restart the API.
+
+---
+
 ## Project layout
 
 ```text
 .
 ├── package.json              # npm workspaces + combined scripts
+├── firebase.json             # Firestore + Storage rules configuration
+├── .firebaserc               # default Firebase project
+├── firestore.rules           # deny all direct client access
+├── storage.rules             # deny all direct client access
 ├── server/
 │   ├── src/
 │   │   ├── index.js          # Express app, static uploads, HTTP + Socket.io server
 │   │   ├── auth.js           # bcrypt hashing and HMAC session tokens
-│   │   ├── db.js             # JSON persistence, load/save, seed bootstrapping
+│   │   ├── firebase.js       # Firebase Admin init, Firestore handle, Storage probe
+│   │   ├── db.js             # Firestore persistence + in-memory cache + JSON fallback
+│   │   ├── storage.js        # Firebase Storage upload with local-disk fallback
 │   │   ├── seed.js           # demo users, conversations, messages, generated media
 │   │   ├── realtime.js       # presence, typing, messages, calls, purge broadcasts
 │   │   ├── serializers.js    # user-safe shapes, anonymous sender masking
 │   │   └── routes/           # auth, users, conversations, messages, uploads
-│   ├── data/                 # db.json and generated .secret (created at runtime)
-│   └── uploads/              # uploaded files and generated seed media
+│   ├── data/                 # service account, db.json fallback, generated .secret
+│   └── uploads/              # fallback uploads and generated seed media
 └── web/
     ├── app/                  # App Router pages: /, /login, /register, /chat
     ├── components/
@@ -152,9 +184,9 @@ cp web/.env.example web/.env.local
 ## How it works
 
 ### Data model
-`server/data/db.json` contains `users`, `conversations`, and `messages`. Each conversation stores participant IDs, per-user modes, and read timestamps. Each message stores its kind (`text`, `audio`, `video`, `image`, `file`), optional attachment metadata, reaction map, and flags.
+Firestore holds three top-level collections: `users`, `conversations`, and `messages`. Each conversation document stores participant IDs, per-user modes, and read timestamps. Each message document stores its kind (`text`, `audio`, `video`, `image`, `file`), optional attachment metadata, reaction map, and flags.
 
-The JSON file is written synchronously after mutations. Delete it (and restart the API) to reseed demo data. Uploaded files are not removed automatically when the database is reset.
+The API loads the collections into memory at boot, then writes each mutation to the matching document. `server/data/db.json` is kept as a mirror for local development and as an automatic fallback if Firebase is not configured. Deleting the `users` collection (and restarting the API) reseeds demo data. Uploaded files are not removed automatically when the database is reset.
 
 ### Realtime events
 Socket.io authenticates with the same bearer token. Key events:
@@ -190,8 +222,8 @@ Both participants join per-user rooms; conversation access is checked before bro
 
 ## Notes and limitations
 
-- This is a demo workspace: data lives in a local JSON file and should not be used as-is for multi-instance production deployments.
+- Relay uses Firestore for persistence but keeps a single-process in-memory cache; it is not yet designed for multiple API instances without a shared pub/sub layer.
 - Sessions are stateless; signing out clears the client token but does not maintain a server-side revocation list.
 - WebRTC uses public STUN only. Add a TURN service for reliable calls across restrictive NATs or corporate networks.
 - Usernames are unique and matched case-insensitively. Anonymity masking happens on serialization, so raw sender IDs are not exposed to the other participant.
-- Vanish mode is cooperative: it removes data from Relay's mock store and broadcasts the removal, but it cannot control screenshots or copies made by a recipient.
+- Vanish mode is cooperative: it removes data from Firestore and broadcasts the removal, but it cannot control screenshots or copies made by a recipient.

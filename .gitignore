@@ -10,6 +10,8 @@ server/uploads/
 .env
 .env.local
 *.log
+.firebase/
+firebase-debug.log
 
 .DS_Store
 Thumbs.db

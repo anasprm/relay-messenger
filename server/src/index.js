@@ -4,7 +4,8 @@ import cors from 'cors';
 import { Server } from 'socket.io';
 
 import { CLIENT_ORIGINS, PORT, UPLOAD_DIR } from './config.js';
-import { getDb } from './db.js';
+import { dbStatus, getDb, initDb } from './db.js';
+import { firebaseStatus, probeStorage } from './firebase.js';
 import { registerRealtime } from './realtime.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -37,6 +38,8 @@ app.get('/api/health', (_req, res) => {
     users: db.users.length,
     conversations: db.conversations.length,
     messages: db.messages.length,
+    database: dbStatus(),
+    firebase: firebaseStatus(),
     uptimeSeconds: Math.round(process.uptime()),
   });
 });
@@ -86,15 +89,6 @@ const io = new Server(server, {
 });
 
 app.locals.io = io;
-registerRealtime(io);
-
-server.listen(PORT, () => {
-  const db = getDb();
-  console.log(`\n  Relay API listening on http://localhost:${PORT}`);
-  console.log(`  Allowed web origins: ${CLIENT_ORIGINS.join(', ')}`);
-  console.log(`  Mock database: ${db.users.length} users · ${db.conversations.length} conversations · ${db.messages.length} messages`);
-  console.log('  Demo login: demo / demo123\n');
-});
 
 function shutdown(signal) {
   console.log(`\n[api] ${signal} received — shutting down.`);
@@ -103,5 +97,31 @@ function shutdown(signal) {
   setTimeout(() => process.exit(0), 4000).unref();
 }
 
+async function main() {
+  await initDb();
+  await probeStorage();
+
+  registerRealtime(io);
+
+  const db = getDb();
+  const status = firebaseStatus();
+  const dbInfo = dbStatus();
+
+  server.listen(PORT, () => {
+    console.log(`\n  Relay API listening on http://localhost:${PORT}`);
+    console.log(`  Allowed web origins: ${CLIENT_ORIGINS.join(', ')}`);
+    console.log(
+      `  Database: ${dbInfo.backend}${status.projectId ? ` (${status.projectId}/${status.databaseId})` : ''} · ${db.users.length} users · ${db.conversations.length} conversations · ${db.messages.length} messages`,
+    );
+    console.log(`  Uploads: ${status.storage === 'firebase' ? `Firebase Storage (${status.storageBucket})` : 'local disk'}`);
+    console.log('  Demo login: demo / demo123\n');
+  });
+}
+
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+main().catch((error) => {
+  console.error('[api] Failed to start:', error);
+  process.exit(1);
+});

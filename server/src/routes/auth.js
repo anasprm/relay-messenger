@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { requireAuth, signToken, hashPassword, verifyPassword } from '../auth.js';
-import { findUserByUsername, getDb, saveDb } from '../db.js';
+import { findUserByUsername, getDb, persistUser } from '../db.js';
 import { publicUser } from '../serializers.js';
 
 const router = Router();
@@ -16,41 +16,45 @@ function titleCase(value) {
     .trim();
 }
 
-router.post('/register', (req, res) => {
-  const username = String(req.body?.username || '').trim().toLowerCase();
-  const password = String(req.body?.password || '');
-  const displayNameInput = String(req.body?.displayName || '').trim();
+router.post('/register', async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const displayNameInput = String(req.body?.displayName || '').trim();
 
-  if (!USERNAME_RE.test(username)) {
-    return res.status(400).json({
-      error: 'Username must be 3–20 characters: letters, numbers, or underscores.',
-    });
-  }
-  if (RESERVED.has(username)) {
-    return res.status(400).json({ error: 'That username is reserved. Please pick another.' });
-  }
-  if (password.length < 6 || Buffer.byteLength(password) > 72) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters (max 72 bytes).' });
-  }
-  if (findUserByUsername(username)) {
-    return res.status(409).json({ error: 'That username is already taken.' });
-  }
+    if (!USERNAME_RE.test(username)) {
+      return res.status(400).json({
+        error: 'Username must be 3–20 characters: letters, numbers, or underscores.',
+      });
+    }
+    if (RESERVED.has(username)) {
+      return res.status(400).json({ error: 'That username is reserved. Please pick another.' });
+    }
+    if (password.length < 6 || Buffer.byteLength(password) > 72) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters (max 72 bytes).' });
+    }
+    if (findUserByUsername(username)) {
+      return res.status(409).json({ error: 'That username is already taken.' });
+    }
 
-  const db = getDb();
-  const user = {
-    id: crypto.randomUUID(),
-    username,
-    displayName: displayNameInput.slice(0, 40) || titleCase(username),
-    accent: ['indigo', 'violet', 'emerald', 'amber', 'rose', 'cyan'][db.users.length % 6],
-    passwordHash: hashPassword(password),
-    createdAt: new Date().toISOString(),
-    lastSeen: new Date().toISOString(),
-  };
+    const db = getDb();
+    const user = {
+      id: crypto.randomUUID(),
+      username,
+      displayName: displayNameInput.slice(0, 40) || titleCase(username),
+      accent: ['indigo', 'violet', 'emerald', 'amber', 'rose', 'cyan'][db.users.length % 6],
+      passwordHash: hashPassword(password),
+      createdAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+    };
 
-  db.users.push(user);
-  saveDb();
+    db.users.push(user);
+    await persistUser(user);
 
-  res.status(201).json({ token: signToken(user), user: publicUser(user) });
+    res.status(201).json({ token: signToken(user), user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/login', (req, res) => {

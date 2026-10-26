@@ -1,39 +1,197 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
+import { getFirestoreDb, getFirebaseProjectId } from './firebase.js';
 import { seedDatabase } from './seed.js';
 
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 let state = null;
+let backend = 'json';
+let lastFirestoreError = null;
 
-function load() {
-  try {
-    state = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    // Basic shape guard — reseed if the file is corrupt or from an older shape.
-    if (!Array.isArray(state.users) || !Array.isArray(state.conversations) || !Array.isArray(state.messages)) {
-      throw new Error('Invalid database shape');
-    }
-  } catch {
-    state = seedDatabase();
-    saveDb();
-  }
+function validShape(candidate) {
+  return (
+    candidate &&
+    Array.isArray(candidate.users) &&
+    Array.isArray(candidate.conversations) &&
+    Array.isArray(candidate.messages)
+  );
 }
 
-export function getDb() {
-  if (!state) load();
-  return state;
-}
-
-export function saveDb() {
+function writeLocalSnapshot() {
   if (!state) return;
   const tmp = `${DB_FILE}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
   fs.renameSync(tmp, DB_FILE);
 }
 
+function loadLocal() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    if (!validShape(parsed)) throw new Error('Invalid database shape');
+    state = parsed;
+  } catch {
+    state = seedDatabase();
+    writeLocalSnapshot();
+  }
+  backend = 'json';
+}
+
+function fromSnapshot(snapshot) {
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+async function writeAllToFirestore(data) {
+  const firestore = getFirestoreDb();
+  if (!firestore) return;
+
+  const collections = ['users', 'conversations', 'messages'];
+  let batch = firestore.batch();
+  let pending = 0;
+
+  for (const collectionName of collections) {
+    const docs = data[collectionName] || [];
+    for (const doc of docs) {
+      batch.set(firestore.collection(collectionName).doc(doc.id), doc);
+      pending += 1;
+      if (pending === 450) {
+        await batch.commit();
+        batch = firestore.batch();
+        pending = 0;
+      }
+    }
+  }
+
+  if (pending > 0) await batch.commit();
+}
+
+async function loadFromFirestore() {
+  const firestore = getFirestoreDb();
+  if (!firestore) throw new Error('Firestore is not configured');
+
+  const [users, conversations, messages] = await Promise.all([
+    firestore.collection('users').get(),
+    firestore.collection('conversations').get(),
+    firestore.collection('messages').get(),
+  ]);
+
+  const parsed = {
+    version: 2,
+    users: fromSnapshot(users),
+    conversations: fromSnapshot(conversations),
+    messages: fromSnapshot(messages),
+  };
+
+  if (parsed.users.length === 0) {
+    const seeded = seedDatabase();
+    await writeAllToFirestore(seeded);
+    state = seeded;
+    backend = 'firestore';
+    writeLocalSnapshot();
+    return;
+  }
+
+  if (!validShape(parsed)) throw new Error('Firestore returned an invalid document shape');
+  state = parsed;
+  backend = 'firestore';
+}
+
+/**
+ * Hydrates the in-memory cache from Firestore when configured, otherwise from
+ * the local JSON snapshot. Must complete before the HTTP server accepts traffic.
+ */
+export async function initDb() {
+  if (state) return state;
+
+  if (getFirestoreDb()) {
+    try {
+      await loadFromFirestore();
+      console.log(
+        `[db] Loaded ${state.users.length} users, ${state.conversations.length} conversations, ${state.messages.length} messages from Firestore (${getFirebaseProjectId()}).`,
+      );
+      return state;
+    } catch (error) {
+      lastFirestoreError = error;
+      console.warn(`[db] Firestore unavailable (${error.message}); falling back to local JSON.`);
+    }
+  }
+
+  loadLocal();
+  console.log(
+    `[db] Loaded ${state.users.length} users, ${state.conversations.length} conversations, ${state.messages.length} messages from local JSON.`,
+  );
+  return state;
+}
+
+export function getDb() {
+  if (!state) {
+    // Routes are only mounted after initDb(), but this keeps tests and tools safe.
+    loadLocal();
+  }
+  return state;
+}
+
+export function saveDb() {
+  writeLocalSnapshot();
+}
+
+async function writeDoc(collectionName, doc) {
+  const firestore = getFirestoreDb();
+  if (!firestore) return;
+
+  try {
+    await firestore.collection(collectionName).doc(doc.id).set(doc, { merge: true });
+    lastFirestoreError = null;
+  } catch (error) {
+    lastFirestoreError = error;
+    console.warn(`[db] Firestore write failed for ${collectionName}/${doc.id}: ${error.message}`);
+  }
+}
+
+export async function persistUser(user) {
+  saveDb();
+  await writeDoc('users', user);
+}
+
+export async function persistConversation(conversation) {
+  saveDb();
+  await writeDoc('conversations', conversation);
+}
+
+export async function persistMessage(message) {
+  saveDb();
+  await writeDoc('messages', message);
+}
+
+export async function deleteMessagesByIds(ids) {
+  if (!ids?.length) return;
+  saveDb();
+
+  const firestore = getFirestoreDb();
+  if (!firestore) return;
+
+  try {
+    const batch = firestore.batch();
+    for (const id of ids) batch.delete(firestore.collection('messages').doc(id));
+    await batch.commit();
+    lastFirestoreError = null;
+  } catch (error) {
+    lastFirestoreError = error;
+    console.warn(`[db] Firestore delete failed: ${error.message}`);
+  }
+}
+
+export function dbStatus() {
+  return {
+    backend,
+    projectId: getFirebaseProjectId(),
+    error: lastFirestoreError?.message || null,
+  };
+}
+
 export function resetDb() {
   state = seedDatabase();
-  saveDb();
+  writeLocalSnapshot();
   return state;
 }
 
