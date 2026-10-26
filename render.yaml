@@ -11,7 +11,7 @@ services:
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
-        value: "20.11.1"
+        value: "22.14.0"
       - key: NODE_ENV
         value: production
       - key: FIREBASE_PROJECT_ID
