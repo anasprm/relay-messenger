@@ -55,6 +55,7 @@ export const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`)
 const DEFAULT_CLIENT_ORIGINS = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'https://relay-messengerpro.vercel.app',
   'https://relay-messenger-anasprm.vercel.app',
 ];
 

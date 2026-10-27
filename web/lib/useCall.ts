@@ -311,6 +311,14 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
         sdp: pc.localDescription,
       });
 
+      // Also send the answer through the generic signal channel, so calls keep
+      // working against an API build that predates the call:answer relay.
+      socket.emit('call:signal', {
+        to: incoming.from.id,
+        conversationId: incoming.conversationId,
+        data: { type: 'sdp', sdp: pc.localDescription },
+      });
+
       updateCall((previous) => ({
         ...previous,
         status: 'active',
@@ -422,6 +430,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
       const pc = pcRef.current;
       if (!pc || !payload?.sdp) return;
       if (payload.conversationId !== callRef.current.conversationId) return;
+      if (pc.remoteDescription) return;
 
       try {
         await pc.setRemoteDescription(payload.sdp);
@@ -443,12 +452,38 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
     const onSignal = async (payload: {
       from: string;
       conversationId: string;
-      data: { type?: string; candidate?: RTCIceCandidateInit } | null;
+      data:
+        | { type?: string; candidate?: RTCIceCandidateInit; sdp?: RTCSessionDescriptionInit }
+        | null;
     }) => {
-      if (!payload?.data || payload.data.type !== 'ice' || !payload.data.candidate) return;
+      if (!payload?.data) return;
       if (payload.conversationId !== callRef.current.conversationId) return;
 
       const pc = pcRef.current;
+
+      if (payload.data.type === 'sdp') {
+        const sdp = payload.data.sdp;
+        if (!pc || !sdp || pc.remoteDescription) return;
+        try {
+          await pc.setRemoteDescription(sdp);
+          for (const candidate of pendingIceRef.current) {
+            await pc.addIceCandidate(candidate).catch(() => undefined);
+          }
+          pendingIceRef.current = [];
+          updateCall((previous) => ({
+            ...previous,
+            status: 'active',
+            startedAt: previous.startedAt || Date.now(),
+          }));
+        } catch {
+          onErrorRef.current?.('The call could not be connected.');
+          cleanup();
+        }
+        return;
+      }
+
+      if (payload.data.type !== 'ice' || !payload.data.candidate) return;
+
       const candidate = payload.data.candidate;
       if (!pc) {
         if (callRef.current.status === 'incoming') {

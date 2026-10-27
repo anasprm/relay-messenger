@@ -127,6 +127,17 @@ export function registerRealtime(io) {
       });
     });
 
+    socket.on('call:answer', (payload = {}) => {
+      if (!conversationBetween(payload.conversationId, user.id, payload.to)) return;
+      if (!payload.sdp) return;
+
+      io.to(`user:${payload.to}`).emit('call:answer', {
+        from: user.id,
+        conversationId: payload.conversationId,
+        sdp: payload.sdp,
+      });
+    });
+
     socket.on('call:decline', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to)) return;
       io.to(`user:${payload.to}`).emit('call:declined', {

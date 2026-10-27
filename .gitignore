@@ -9,6 +9,7 @@ server/uploads/
 
 .env
 .env.local
+.deploy.local
 *.log
 .firebase/
 firebase-debug.log
