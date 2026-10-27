@@ -104,7 +104,7 @@ export function WelcomeScreen() {
             </Link>
             <Link
               href="/register"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-accent-hover sm:px-3.5"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-semibold text-accent-ink shadow-sm transition-colors hover:bg-accent-hover sm:px-3.5"
             >
               Create account
               <ArrowRight size={13} />
@@ -117,8 +117,8 @@ export function WelcomeScreen() {
         {/* Hero */}
         <section className="relative overflow-hidden border-b border-line">
           <div className="ui-decor brand-grid absolute inset-0 opacity-40 [mask-image:radial-gradient(ellipse_at_top,black,transparent_72%)]" />
-          <div className="ui-decor absolute -left-32 top-0 h-80 w-80 rounded-full bg-indigo-500/10 blur-[110px]" />
-          <div className="ui-decor absolute -right-24 bottom-0 h-80 w-80 rounded-full bg-violet-500/10 blur-[120px]" />
+          <div className="ui-decor absolute -left-32 top-0 h-80 w-80 rounded-full bg-emerald-500/10 blur-[110px]" />
+          <div className="ui-decor absolute -right-24 bottom-0 h-80 w-80 rounded-full bg-teal-500/10 blur-[120px]" />
 
           <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[1.02fr_0.98fr] lg:items-center lg:gap-14 lg:py-20">
             <div>
@@ -141,7 +141,7 @@ export function WelcomeScreen() {
               <div className="mt-7 flex flex-wrap items-center gap-2.5">
                 <Link
                   href="/register"
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-accent-hover"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink shadow-sm transition-colors hover:bg-accent-hover"
                 >
                   Create your account
                   <ArrowRight size={14} />
@@ -180,7 +180,7 @@ export function WelcomeScreen() {
 
             {/* Product preview */}
             <div className="relative">
-              <div className="ui-decor absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-indigo-500/10 via-transparent to-violet-500/10 blur-2xl" />
+              <div className="ui-decor absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-emerald-500/10 via-transparent to-teal-500/10 blur-2xl" />
 
               <div className="relative overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_30px_80px_-46px_rgba(15,23,42,0.55)]">
                 <div className="flex items-center justify-between gap-2 border-b border-line bg-panel-2/60 px-4 py-3">
@@ -202,7 +202,7 @@ export function WelcomeScreen() {
                       <ShieldCheck size={9} />
                       Anon
                     </span>
-                    <span className="inline-flex h-6 items-center gap-1 rounded-md border border-violet-300/50 bg-violet-50 px-1.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-violet-600 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+                    <span className="inline-flex h-6 items-center gap-1 rounded-md border border-amber-300/60 bg-amber-50 px-1.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300">
                       <Ghost size={9} />
                       Vanish
                     </span>
@@ -222,9 +222,9 @@ export function WelcomeScreen() {
                   </div>
 
                   <div className="flex justify-end">
-                    <div className="max-w-[80%] rounded-xl rounded-br-sm bg-accent px-3 py-2 text-[11.5px] leading-relaxed text-white">
+                    <div className="max-w-[80%] rounded-xl rounded-br-sm bg-accent px-3 py-2 text-[11.5px] leading-relaxed text-accent-ink">
                       Opening them now — this layout finally breathes.
-                      <span className="mt-1 block text-[9px] text-white/65">9:44 AM</span>
+                      <span className="mt-1 block text-[9px] text-accent-ink/65">9:44 AM</span>
                     </div>
                   </div>
 
@@ -264,7 +264,7 @@ export function WelcomeScreen() {
                     <span className="flex-1">Write a message…</span>
                     <Paperclip size={12} />
                     <Mic size={12} />
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-white">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-accent-ink">
                       <ArrowRight size={11} />
                     </span>
                   </div>
@@ -356,8 +356,8 @@ export function WelcomeScreen() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-dashed border-violet-300/70 bg-violet-50/40 p-4 dark:border-violet-800/60 dark:bg-violet-950/15">
-                <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-600 dark:text-violet-300">
+              <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/50 p-4 dark:border-amber-800/60 dark:bg-amber-950/15">
+                <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-amber-700 dark:text-amber-300">
                   <Ghost size={10} />
                   Vanish on
                 </div>
@@ -424,7 +424,7 @@ export function WelcomeScreen() {
           <div className="ui-decor brand-grid absolute inset-0 opacity-30 [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]" />
           <div className="relative mx-auto w-full max-w-6xl px-4 py-14 sm:px-6 lg:py-18">
             <div className="rounded-2xl border border-line bg-panel px-6 py-10 text-center shadow-sm sm:px-10">
-              <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-white shadow-sm">
+              <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-accent-ink shadow-sm">
                 <MessageSquareText size={20} />
               </span>
               <h2 className="text-balance mt-5 text-[26px] font-semibold tracking-[-0.025em] text-ink sm:text-[30px]">
@@ -436,7 +436,7 @@ export function WelcomeScreen() {
               <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
                 <Link
                   href="/register"
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-accent-hover"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink shadow-sm transition-colors hover:bg-accent-hover"
                 >
                   Create account
                   <ArrowRight size={14} />

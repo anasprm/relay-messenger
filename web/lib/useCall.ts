@@ -42,10 +42,33 @@ const IDLE: CallState = {
   error: null,
 };
 
-const ICE_SERVERS: RTCIceServer[] = [
+const STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
+
+/**
+ * STUN alone cannot connect every network. When TURN credentials are provided
+ * at build time, they are added as a relay fallback for restrictive NATs.
+ */
+function buildIceServers(): RTCIceServer[] {
+  const urls = (process.env.NEXT_PUBLIC_TURN_URL || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return STUN_SERVERS;
+
+  return [
+    ...STUN_SERVERS,
+    {
+      urls,
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME || undefined,
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL || undefined,
+    },
+  ];
+}
+
+const ICE_SERVERS = buildIceServers();
 
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,

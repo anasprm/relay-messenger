@@ -89,18 +89,18 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     <div className="flex min-h-dvh flex-col bg-app">
       <div className="grid flex-1 lg:grid-cols-[1.06fr_1fr]">
         {/* Brand / marketing rail */}
-        <aside className="relative hidden overflow-hidden bg-[#080c19] lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
+        <aside className="relative hidden overflow-hidden bg-[#06110e] lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
           <div className="brand-grid absolute inset-0 opacity-60" />
-          <div className="absolute -left-24 top-1/4 h-80 w-80 rounded-full bg-indigo-600/25 blur-[110px]" />
-          <div className="absolute -right-32 bottom-10 h-96 w-96 rounded-full bg-violet-600/20 blur-[130px]" />
-          <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-indigo-400/25 to-transparent" />
+          <div className="absolute -left-24 top-1/4 h-80 w-80 rounded-full bg-emerald-500/25 blur-[110px]" />
+          <div className="absolute -right-32 bottom-10 h-96 w-96 rounded-full bg-teal-500/20 blur-[130px]" />
+          <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-emerald-400/25 to-transparent" />
 
           <div className="relative">
             <Logo inverted />
           </div>
 
           <div className="relative mt-10 max-w-lg">
-            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-200">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               Private workspace messaging
             </div>
@@ -109,12 +109,12 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               <br />
               without the noise.
             </h1>
-            <p className="mt-5 max-w-md text-[14px] leading-relaxed text-slate-400">
+            <p className="mt-5 max-w-md text-[14px] leading-relaxed text-white/55">
               Direct threads, real-time presence, and peer-to-peer calls — wrapped in a calm,
               enterprise-grade interface built for focused teams.
             </p>
 
-            <ul className="mt-8 grid gap-3 text-[13px] text-slate-300">
+            <ul className="mt-8 grid gap-3 text-[13px] text-white/70">
               {[
                 { icon: MessageSquareText, label: 'Direct threads with instant delivery' },
                 { icon: PhoneCall, label: 'Peer-to-peer audio and video calls' },
@@ -122,7 +122,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                 { icon: ShieldCheck, label: 'Anonymity and vanish-mode privacy controls' },
               ].map(({ icon: Icon, label }) => (
                 <li key={label} className="flex items-center gap-3">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-indigo-300">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-emerald-300">
                     <Icon size={14} />
                   </span>
                   {label}
@@ -136,7 +136,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                 <span className="h-2 w-2 rounded-full bg-rose-400/70" />
                 <span className="h-2 w-2 rounded-full bg-amber-400/70" />
                 <span className="h-2 w-2 rounded-full bg-emerald-400/70" />
-                <span className="ml-3 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+                <span className="ml-3 text-[10px] font-medium uppercase tracking-[0.16em] text-white/40">
                   Alice Morgan · Online
                 </span>
               </div>
@@ -146,16 +146,16 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                     user={{ displayName: 'Alice Morgan', accent: 'indigo' }}
                     size="xs"
                   />
-                  <div className="max-w-[78%] rounded-2xl rounded-tl-md border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-slate-200">
+                  <div className="max-w-[78%] rounded-2xl rounded-tl-md border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-white/80">
                     The wireframes are ready for review.
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <div className="max-w-[78%] rounded-2xl rounded-br-md bg-indigo-600 px-3 py-2 text-[12px] text-white shadow-lg shadow-indigo-950/40">
+                  <div className="max-w-[78%] rounded-2xl rounded-br-md bg-accent px-3 py-2 text-[12px] text-accent-ink shadow-lg shadow-emerald-950/40">
                     Opening them now — this layout finally breathes.
                   </div>
                 </div>
-                <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-500">
+                <div className="flex items-center gap-2 pt-1 text-[10px] text-white/40">
                   <Lock size={10} />
                   Vanish mode ready · messages wipe on exit
                   <span className="ml-auto inline-flex items-center gap-1 text-emerald-300/90">
@@ -166,7 +166,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
             </div>
           </div>
 
-          <p className="relative mt-10 text-[11px] text-slate-600">
+          <p className="relative mt-10 text-[11px] text-white/30">
             © 2026 Relay Systems · Session-based access · No external identity providers
           </p>
         </aside>
@@ -305,7 +305,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   type="submit"
                   disabled={submitting}
                   className={cn(
-                    'group flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent text-sm font-semibold text-white shadow-[0_14px_30px_-14px_rgba(79,70,229,0.9)] transition-all hover:bg-accent-hover',
+                    'group flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent text-sm font-semibold text-accent-ink shadow-[0_14px_30px_-14px_rgba(0,168,132,0.65)] transition-all hover:bg-accent-hover',
                     submitting && 'opacity-80',
                   )}
                 >

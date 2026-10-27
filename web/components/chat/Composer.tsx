@@ -2,18 +2,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  AlertCircle,
   FileText,
+  Ghost,
   Image as ImageIcon,
   Loader2,
   Mic,
   Paperclip,
   Send,
   ShieldCheck,
+  Smile,
   Video,
   X,
 } from 'lucide-react';
+import { EmojiPicker } from './EmojiPicker';
 import { errorMessage } from '@/lib/AuthProvider';
 import { mediaUrl, uploadAttachment } from '@/lib/api';
+import { clearDraft, readDraft, writeDraft } from '@/lib/drafts';
 import { formatBytes, formatDuration } from '@/lib/format';
 import { useToast } from '@/lib/ToastProvider';
 import { cn } from '@/lib/utils';
@@ -24,32 +29,50 @@ import { VoiceRecorder } from './VoiceRecorder';
 const MAX_BYTES = 30 * 1024 * 1024;
 
 interface ComposerProps {
+  conversationId: string;
+  draftOwnerId: string;
   disabled?: boolean;
   vanish: boolean;
   anonymity: boolean;
   onSend: (payload: SendMessagePayload) => Promise<boolean>;
   onTypingChange: (typing: boolean) => void;
+  onDraftChange?: (conversationId: string, text: string) => void;
 }
 
 export function Composer({
+  conversationId,
+  draftOwnerId,
   disabled = false,
   vanish,
   anonymity,
   onSend,
   onTypingChange,
+  onDraftChange,
 }: ComposerProps) {
   const { toast } = useToast();
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const sendingRef = useRef(false);
+
+  useEffect(() => {
+    setText(readDraft(draftOwnerId, conversationId));
+    setAttachment(null);
+    setSendError(null);
+  }, [conversationId, draftOwnerId]);
 
   useEffect(() => {
     const element = textareaRef.current;
@@ -57,6 +80,14 @@ export function Composer({
     element.style.height = '0px';
     element.style.height = `${Math.min(element.scrollHeight, 140)}px`;
   }, [text]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      writeDraft(draftOwnerId, conversationId, text);
+      onDraftChange?.(conversationId, text);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [conversationId, draftOwnerId, onDraftChange, text]);
 
   useEffect(() => {
     if (!text.trim()) {
@@ -72,6 +103,28 @@ export function Composer({
     return () => onTypingChange(false);
   }, [onTypingChange]);
 
+  useEffect(() => {
+    if (!emojiOpen && !attachOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!toolsRef.current?.contains(event.target as Node)) {
+        setEmojiOpen(false);
+        setAttachOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setEmojiOpen(false);
+        setAttachOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [attachOpen, emojiOpen]);
+
   async function pickFile(file: File | undefined) {
     if (!file) return;
     if (file.size > MAX_BYTES) {
@@ -82,6 +135,7 @@ export function Composer({
     setUploading(true);
     setProgress(0);
     setAttachment(null);
+    setSendError(null);
 
     try {
       const uploaded = await uploadAttachment(file, { filename: file.name }, setProgress);
@@ -95,6 +149,39 @@ export function Composer({
     }
   }
 
+  async function dispatch(
+    payload: SendMessagePayload,
+    options: { clearComposer: boolean },
+  ): Promise<boolean> {
+    if (disabled || sendingRef.current) return false;
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
+
+    try {
+      const ok = await onSend(payload);
+      if (ok) {
+        if (options.clearComposer) {
+          setText('');
+          setAttachment(null);
+          clearDraft(draftOwnerId, conversationId);
+          onDraftChange?.(conversationId, '');
+        }
+        onTypingChange(false);
+        textareaRef.current?.focus();
+      } else {
+        setSendError('Message was not sent. Check your connection and try again.');
+      }
+      return ok;
+    } catch (caught) {
+      setSendError(errorMessage(caught));
+      return false;
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+
   async function sendUploadedBlob(
     blob: Blob,
     filename: string,
@@ -102,25 +189,30 @@ export function Composer({
     duration: number,
     dimensions?: { width: number; height: number },
   ): Promise<boolean> {
+    if (sendingRef.current) return false;
     setUploading(true);
     setProgress(0);
+    setSendError(null);
+
     try {
       const uploaded = await uploadAttachment(
         blob,
         {
           filename,
+          contentType: kind === 'audio' ? 'audio/webm' : 'video/webm',
           duration,
           width: dimensions?.width,
           height: dimensions?.height,
         },
         setProgress,
       );
-      const ok = await onSend({ kind, attachment: uploaded, text: '' });
+      const ok = await dispatch({ kind, attachment: uploaded, text: '' }, { clearComposer: false });
       if (!ok) return false;
       if (kind === 'audio') setVoiceOpen(false);
       if (kind === 'video') setVideoOpen(false);
       return true;
     } catch (caught) {
+      setSendError(errorMessage(caught));
       toast(errorMessage(caught), 'error');
       return false;
     } finally {
@@ -129,23 +221,18 @@ export function Composer({
   }
 
   async function submit() {
-    if (disabled || uploading) return;
+    if (disabled || uploading || sendingRef.current) return;
     const trimmed = text.trim();
     if (!trimmed && !attachment) return;
 
-    if (voiceOpen) return;
-    const ok = await onSend({
-      text: trimmed,
-      kind: attachment?.kind || 'text',
-      attachment: attachment || undefined,
-    });
-
-    if (ok) {
-      setText('');
-      setAttachment(null);
-      onTypingChange(false);
-      textareaRef.current?.focus();
-    }
+    await dispatch(
+      {
+        text: trimmed,
+        kind: attachment?.kind || 'text',
+        attachment: attachment || undefined,
+      },
+      { clearComposer: true },
+    );
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -155,18 +242,34 @@ export function Composer({
     }
   }
 
-  const canSend = !disabled && !uploading && (text.trim().length > 0 || !!attachment);
+  function insertEmoji(emoji: string) {
+    const element = textareaRef.current;
+    const start = element?.selectionStart ?? text.length;
+    const end = element?.selectionEnd ?? start;
+    const next = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
+    setText(next);
+    window.requestAnimationFrame(() => {
+      const field = textareaRef.current;
+      if (!field) return;
+      field.focus();
+      const caret = start + emoji.length;
+      field.setSelectionRange(caret, caret);
+    });
+  }
+
+  const canSend = !disabled && !uploading && !sending && (text.trim().length > 0 || !!attachment);
+  const showSend = canSend || sending;
 
   if (voiceOpen) {
     return (
-      <div className="border-t border-line bg-panel px-4 py-2.5 sm:px-6">
-        <div className="mx-auto max-w-4xl">
+      <div className="shrink-0 border-t border-line bg-panel px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
+        <div className="mx-auto max-w-5xl">
           <VoiceRecorder
             onCancel={() => setVoiceOpen(false)}
             onSend={(blob, duration) =>
               void sendUploadedBlob(blob, `voice-note-${Date.now()}.webm`, 'audio', duration)
             }
-            busy={uploading}
+            busy={uploading || sending}
           />
           {uploading && (
             <div className="mb-1 mt-2 flex items-center gap-2 text-[10px] text-muted">
@@ -180,7 +283,7 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-line bg-panel px-3 py-3 sm:px-6">
+    <div className="shrink-0 border-t border-line bg-panel px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
       <VideoRecorder
         open={videoOpen}
         onClose={() => setVideoOpen(false)}
@@ -190,11 +293,11 @@ export function Composer({
             height,
           })
         }
-        busy={uploading}
+        busy={uploading || sending}
       />
 
       <div
-        className="mx-auto max-w-4xl"
+        className="mx-auto max-w-5xl"
         onDragOver={(event) => {
           event.preventDefault();
           setDragging(true);
@@ -207,6 +310,28 @@ export function Composer({
           void pickFile(file);
         }}
       >
+        {sendError && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-danger/25 bg-danger/5 px-3 py-2 text-[11px] text-danger">
+            <AlertCircle size={14} className="shrink-0" />
+            <span className="min-w-0 flex-1 leading-snug">{sendError}</span>
+            <button
+              type="button"
+              onClick={() => void submit()}
+              className="shrink-0 rounded-full border border-danger/30 px-2 py-0.5 text-[10px] font-semibold transition-colors hover:bg-danger/10"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => setSendError(null)}
+              className="shrink-0 rounded-full p-0.5 transition-colors hover:bg-danger/10"
+              aria-label="Dismiss send error"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
         {(uploading || attachment) && (
           <div className="mb-2 space-y-2">
             {uploading && (
@@ -257,7 +382,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="rounded-lg p-1.5 text-faint transition-colors hover:bg-panel hover:text-ink"
+                  className="rounded-full p-1.5 text-faint transition-colors hover:bg-panel hover:text-ink"
                   aria-label="Remove attachment"
                 >
                   <X size={14} />
@@ -267,13 +392,14 @@ export function Composer({
           </div>
         )}
 
-        <div
-          className={cn(
-            'rounded-2xl border bg-panel-2 transition-colors focus-within:border-accent/60 focus-within:bg-panel focus-within:ring-4 focus-within:ring-accent/10',
-            dragging ? 'border-accent bg-accent-soft/50' : 'border-line',
-          )}
-        >
-          <div className="flex items-end gap-1.5 px-2 py-2 sm:px-3">
+        <div className="flex items-end gap-1.5 sm:gap-2">
+          <div
+            ref={toolsRef}
+            className={cn(
+              'relative flex min-w-0 flex-1 items-end rounded-[26px] border border-transparent bg-panel-2 px-1 py-1 transition-colors focus-within:border-accent/30 focus-within:bg-panel',
+              dragging && 'border-accent bg-accent-soft/60',
+            )}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -288,109 +414,166 @@ export function Composer({
               onChange={(event) => void pickFile(event.target.files?.[0])}
             />
 
-            <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || uploading}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40"
-                aria-label="Attach a file"
-                title="Attach file (max 30 MB)"
-              >
-                <Paperclip size={17} />
-              </button>
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                disabled={disabled || uploading}
-                className="hidden h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40 sm:flex"
-                aria-label="Attach an image"
-                title="Attach image"
-              >
-                <ImageIcon size={17} />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEmojiOpen((open) => !open);
+                setAttachOpen(false);
+              }}
+              disabled={disabled}
+              className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40',
+                emojiOpen && 'bg-panel text-accent',
+              )}
+              aria-label="Choose an emoji"
+              aria-expanded={emojiOpen}
+              title="Emoji"
+            >
+              <Smile size={19} />
+            </button>
+
+            {emojiOpen && (
+              <EmojiPicker
+                align="left"
+                onSelect={insertEmoji}
+                onClose={() => setEmojiOpen(false)}
+              />
+            )}
 
             <textarea
               ref={textareaRef}
               rows={1}
               value={text}
               disabled={disabled}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => {
+                setText(event.target.value);
+                setSendError(null);
+              }}
               onKeyDown={handleKeyDown}
               placeholder={
                 disabled
                   ? 'Select a conversation to start messaging'
                   : vanish
                     ? 'Vanish mode — this message disappears when you leave…'
-                    : 'Write a message…'
+                    : 'Type a message'
               }
-              className="max-h-[140px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-2 text-[13.5px] leading-relaxed text-ink placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
+              className="max-h-[140px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-2 text-[14px] leading-relaxed text-ink placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
             />
 
-            <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
+            <div className="relative shrink-0">
               <button
                 type="button"
-                onClick={() => setVoiceOpen(true)}
+                onClick={() => {
+                  setAttachOpen((open) => !open);
+                  setEmojiOpen(false);
+                }}
                 disabled={disabled || uploading}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40"
-                aria-label="Record a voice message"
-                title="Voice note"
-              >
-                <Mic size={17} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setVideoOpen(true)}
-                disabled={disabled || uploading}
-                className="hidden h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40 sm:flex"
-                aria-label="Record a video message"
-                title="Video note"
-              >
-                <Video size={17} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!canSend}
                 className={cn(
-                  'ml-1 flex h-8 w-8 items-center justify-center rounded-lg transition-all',
-                  canSend
-                    ? 'bg-accent text-white shadow-sm hover:bg-accent-hover'
-                    : 'bg-line text-faint',
+                  'flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-40',
+                  attachOpen && 'bg-panel text-accent',
                 )}
-                aria-label="Send message"
-                title="Send (Enter)"
+                aria-label="Attach a file"
+                aria-expanded={attachOpen}
+                title="Attach (max 30 MB)"
               >
-                {uploading ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : (
-                  <Send size={15} />
-                )}
+                <Paperclip size={19} />
               </button>
+
+              {attachOpen && (
+                <div
+                  role="menu"
+                  aria-label="Attach"
+                  className="absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-line bg-elevated p-1 shadow-[0_18px_50px_-18px_rgba(15,23,42,0.5)] animate-pop-in"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      imageInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <ImageIcon size={16} className="text-accent" />
+                    Photo
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <FileText size={16} className="text-muted" />
+                    Document
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      setVideoOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <Video size={16} className="text-muted" />
+                    Video note
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-line/70 px-3 py-1.5">
-            <div className="flex min-w-0 items-center gap-2 text-[9.5px] text-faint">
-              {anonymity ? (
-                <span className="flex items-center gap-1 font-medium text-accent">
-                  <ShieldCheck size={10} />
-                  Sending anonymously
-                </span>
-              ) : (
-                <span className="hidden sm:inline">
-                  Enter to send · Shift + Enter for a new line
-                </span>
-              )}
-              {anonymity && (
-                <span className="hidden truncate sm:inline">· identity masked on delivery</span>
-              )}
-            </div>
-            <span className="shrink-0 text-[9.5px] text-faint">
-              {text.trim().length > 0 ? `${text.trim().length} chars` : 'Relay'}
-            </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (showSend) void submit();
+              else setVoiceOpen(true);
+            }}
+            disabled={disabled || uploading || (showSend && !canSend)}
+            className={cn(
+              'flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all',
+              showSend
+                ? 'bg-accent text-accent-ink shadow-sm hover:bg-accent-hover'
+                : 'bg-panel-2 text-muted hover:bg-accent hover:text-accent-ink',
+              (disabled || uploading) && 'opacity-40',
+            )}
+            aria-label={showSend ? 'Send message' : 'Record a voice message'}
+            title={showSend ? 'Send (Enter)' : 'Voice note'}
+          >
+            {sending || uploading ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : showSend ? (
+              <Send size={18} />
+            ) : (
+              <Mic size={19} />
+            )}
+          </button>
+        </div>
+
+        <div className="mt-1 flex min-h-[16px] items-center justify-between gap-3 px-1.5 text-[9.5px] text-faint">
+          <div className="flex min-w-0 items-center gap-2">
+            {anonymity && (
+              <span className="flex items-center gap-1 font-medium text-accent">
+                <ShieldCheck size={10} />
+                Anonymous
+              </span>
+            )}
+            {vanish && (
+              <span className="flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
+                <Ghost size={10} />
+                Vanish
+              </span>
+            )}
+            {!anonymity && !vanish && (
+              <span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span>
+            )}
           </div>
+          <span className="hidden shrink-0 tabular-nums sm:inline">
+            {text.trim().length > 0 ? `${text.trim().length} chars` : 'Relay'}
+          </span>
         </div>
       </div>
     </div>

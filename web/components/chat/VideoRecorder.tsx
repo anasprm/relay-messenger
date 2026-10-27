@@ -211,8 +211,8 @@ export function VideoRecorder({ open, onClose, onSend, busy = false }: VideoReco
         <div className="relative aspect-video overflow-hidden rounded-xl border border-line bg-slate-950">
           {status === 'error' ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-              <CameraOff size={26} className="text-slate-500" />
-              <p className="text-xs leading-relaxed text-slate-400">{error}</p>
+              <CameraOff size={26} className="text-white/45" />
+              <p className="text-xs leading-relaxed text-white/60">{error}</p>
             </div>
           ) : recorded ? (
             <video
@@ -231,14 +231,14 @@ export function VideoRecorder({ open, onClose, onSend, busy = false }: VideoReco
                 className="h-full w-full scale-x-[-1] object-cover"
               />
               {status === 'requesting' && (
-                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-slate-950/60 text-xs text-slate-300">
+                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-slate-950/60 text-xs text-white/70">
                   <Loader2 size={15} className="animate-spin" />
                   Starting camera…
                 </div>
               )}
               {status === 'ready' && (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="rounded-full border border-white/15 bg-slate-950/60 px-3 py-1.5 text-[11px] text-slate-300 backdrop-blur">
+                  <span className="rounded-full border border-white/15 bg-slate-950/60 px-3 py-1.5 text-[11px] text-white/70 backdrop-blur">
                     <Video size={11} className="mr-1.5 inline" />
                     Camera ready — press record
                   </span>
@@ -336,7 +336,7 @@ export function VideoRecorder({ open, onClose, onSend, busy = false }: VideoReco
               onClick={() => onSend(recorded, seconds, dimensions.width, dimensions.height)}
               disabled={busy}
               className={cn(
-                'inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-xs font-semibold text-white transition-colors hover:bg-accent-hover',
+                'inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent-hover',
                 busy && 'opacity-60',
               )}
             >

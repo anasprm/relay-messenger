@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, TriangleAlert } from 'lucide-react';
 import { formatDuration } from '@/lib/format';
 import { mediaUrl } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,7 @@ export function AudioMessage({
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(attachment.duration || 0);
+  const [failed, setFailed] = useState(false);
   const bars = useMemo(() => waveformBars(messageId), [messageId]);
 
   useEffect(() => {
@@ -91,8 +92,29 @@ export function AudioMessage({
 
   const progress = duration > 0 ? Math.min(1, current / duration) : 0;
 
+  if (failed) {
+    return (
+      <div className="flex w-[min(17rem,100%)] min-w-[210px] items-center gap-2.5 py-0.5" role="status">
+        <span
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+            mine ? 'bg-bubble-sent-ink/10 text-bubble-sent-ink' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300',
+          )}
+        >
+          <TriangleAlert size={15} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11.5px] font-medium">Voice message unavailable</span>
+          <span className={cn('block text-[9.5px]', mine ? 'text-bubble-sent-ink/60' : 'text-faint')}>
+            The file is no longer on the server.
+          </span>
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex w-[252px] max-w-full items-center gap-2.5 py-0.5">
+    <div className="flex w-[min(17rem,100%)] min-w-[210px] max-w-full items-center gap-2.5 py-0.5">
       <button
         type="button"
         onClick={toggle}
@@ -100,8 +122,8 @@ export function AudioMessage({
         className={cn(
           'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
           mine
-            ? 'bg-white/20 text-white hover:bg-white/30'
-            : 'bg-accent text-white hover:bg-accent-hover',
+            ? 'bg-bubble-sent-ink/15 text-bubble-sent-ink hover:bg-bubble-sent-ink/25'
+            : 'bg-accent text-accent-ink hover:bg-accent-hover',
         )}
       >
         {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
@@ -123,10 +145,10 @@ export function AudioMessage({
                 'flex-1 rounded-full transition-colors duration-150',
                 filled
                   ? mine
-                    ? 'bg-white'
+                    ? 'bg-bubble-sent-ink'
                     : 'bg-accent'
                   : mine
-                    ? 'bg-white/30'
+                    ? 'bg-bubble-sent-ink/25'
                     : 'bg-line-strong',
               )}
             />
@@ -137,13 +159,18 @@ export function AudioMessage({
       <span
         className={cn(
           'w-16 shrink-0 text-right text-[10px] tabular-nums',
-          mine ? 'text-white/70' : 'text-faint',
+          mine ? 'text-bubble-sent-ink/60' : 'text-faint',
         )}
       >
         {formatDuration(playing || current > 0 ? current : duration)}
       </span>
 
-      <audio ref={audioRef} src={mediaUrl(attachment.url)} preload="metadata" />
+      <audio
+        ref={audioRef}
+        src={mediaUrl(attachment.url)}
+        preload="metadata"
+        onError={() => setFailed(true)}
+      />
     </div>
   );
 }

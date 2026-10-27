@@ -3,24 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
-import {
-  Ghost,
-  Lock,
-  MessageSquarePlus,
-  MessagesSquare,
-  ShieldCheck,
-  Zap,
-} from 'lucide-react';
 
 import { CallOverlay } from './CallOverlay';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
+import { ContactPanel } from './ContactPanel';
 import { MessageList } from './MessageList';
 import { NewChatDialog } from './NewChatDialog';
-import { Sidebar } from './Sidebar';
+import { ProfileDialog } from './ProfileDialog';
+import { Sidebar, type ConversationFilter } from './Sidebar';
+import { WelcomePane } from './WelcomePane';
 import { Splash } from '@/components/ui/Splash';
 import { API_URL, api } from '@/lib/api';
 import { errorMessage, useAuth } from '@/lib/AuthProvider';
+import { readAllDrafts } from '@/lib/drafts';
+import { favoritesKey, pinnedKey, readIdSet, writeIdSet } from '@/lib/localSets';
 import { createSocket } from '@/lib/socket';
 import { useToast } from '@/lib/ToastProvider';
 import { useCall } from '@/lib/useCall';
@@ -35,57 +32,19 @@ function sortByActivity(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort((a, b) => activityTime(b) - activityTime(a));
 }
 
-function EmptyPane({ onNewChat }: { onNewChat: () => void }) {
-  return (
-    <div className="relative flex h-full flex-col items-center justify-center overflow-hidden px-6">
-      <div className="brand-grid pointer-events-none absolute inset-0 opacity-40 [mask-image:radial-gradient(ellipse_at_center,black,transparent_72%)]" />
-      <div className="relative flex max-w-sm flex-col items-center text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-panel text-accent shadow-sm">
-          <MessagesSquare size={24} />
-        </span>
-        <h2 className="mt-5 text-[17px] font-semibold tracking-[-0.01em] text-ink">
-          Your workspace, focused.
-        </h2>
-        <p className="mt-2 text-[12.5px] leading-relaxed text-muted">
-          Select a direct thread from the sidebar, or start a new conversation with any username in
-          the workspace.
-        </p>
-        <button
-          type="button"
-          onClick={onNewChat}
-          className="mt-5 inline-flex h-9 items-center gap-2 rounded-xl bg-accent px-4 text-[12px] font-semibold text-white shadow-[0_12px_28px_-14px_rgba(79,70,229,0.9)] transition-colors hover:bg-accent-hover"
-        >
-          <MessageSquarePlus size={14} />
-          New conversation
-        </button>
-
-        <div className="mt-9 grid gap-2 text-left text-[10.5px] text-faint">
-          {[
-            { icon: Zap, label: 'Realtime delivery over Socket.io' },
-            { icon: ShieldCheck, label: 'Anonymity and vanish-mode controls' },
-            { icon: Lock, label: 'Peer-to-peer encrypted calls' },
-          ].map(({ icon: Icon, label }) => (
-            <span key={label} className="flex items-center gap-2">
-              <Icon size={11} className="text-accent" />
-              {label}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function ChatShell() {
   const router = useRouter();
   const { user, token, loading, logout } = useAuth();
   const { toast } = useToast();
+  const ownerId = user?.id;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageReloadKey, setMessageReloadKey] = useState(0);
   const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
   const [typing, setTyping] = useState<Record<string, boolean>>({});
   const [connected, setConnected] = useState(false);
@@ -93,6 +52,19 @@ export function ChatShell() {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newChatQuery, setNewChatQuery] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
+
+  const [filter, setFilter] = useState<ConversationFilter>('all');
+  const [searchFocusSignal, setSearchFocusSignal] = useState(0);
+  const [focusMode, setFocusMode] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
+  const [pinned, setPinned] = useState<Set<string>>(() => new Set());
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchIndex, setMatchIndex] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
   const activeIdRef = useRef<string | null>(null);
@@ -103,6 +75,19 @@ export function ChatShell() {
     () => conversations.find((conversation) => conversation.id === activeId) || null,
     [activeId, conversations],
   );
+
+  const matches = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return [] as Message[];
+    return messages.filter(
+      (message) =>
+        (message.text || '').toLowerCase().includes(needle) ||
+        (message.attachment?.name || '').toLowerCase().includes(needle),
+    );
+  }, [messages, searchQuery]);
+
+  const safeMatchIndex = matches.length === 0 ? 0 : Math.min(matchIndex, matches.length - 1);
+  const activeMatch = matches[safeMatchIndex] || null;
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -115,6 +100,47 @@ export function ChatShell() {
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
   }, [loading, router, user]);
+
+  /* A new signed-in user gets a clean local view. */
+  useEffect(() => {
+    setActiveId(null);
+    setMessages([]);
+    setMobileThreadOpen(false);
+    setInfoOpen(false);
+    setProfileOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
+    setMatchIndex(0);
+    setFilter('all');
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!ownerId) {
+      setFavorites(new Set());
+      setPinned(new Set());
+      setDrafts({});
+      return;
+    }
+    setFavorites(readIdSet(favoritesKey(ownerId)));
+    setPinned(readIdSet(pinnedKey(ownerId)));
+    setDrafts(readAllDrafts(ownerId));
+  }, [ownerId]);
+
+  useEffect(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setMatchIndex(0);
+  }, [activeId]);
+
+  useEffect(() => {
+    setMatchIndex(0);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setMatchIndex((current) =>
+      matches.length === 0 ? 0 : Math.min(current, matches.length - 1),
+    );
+  }, [matches.length]);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -378,11 +404,14 @@ export function ChatShell() {
 
     if (!activeId) {
       setMessages([]);
+      setMessageError(null);
+      setLoadingMessages(false);
       return;
     }
 
     let cancelled = false;
     setLoadingMessages(true);
+    setMessageError(null);
     setMessages([]);
 
     api
@@ -411,7 +440,7 @@ export function ChatShell() {
         void api.post(`/api/conversations/${activeId}/read`).catch(() => undefined);
       })
       .catch((error) => {
-        if (!cancelled) toast(errorMessage(error), 'error');
+        if (!cancelled) setMessageError(errorMessage(error));
       })
       .finally(() => {
         if (!cancelled) setLoadingMessages(false);
@@ -420,7 +449,7 @@ export function ChatShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, toast]);
+  }, [activeId, messageReloadKey]);
 
   /* Closing a thread destroys its vanish-mode messages on both sides. */
   useEffect(() => {
@@ -577,6 +606,48 @@ export function ChatShell() {
     [toast],
   );
 
+  const toggleFavorite = useCallback(
+    (conversationId: string) => {
+      if (!ownerId) return;
+      setFavorites((previous) => {
+        const next = new Set(previous);
+        if (next.has(conversationId)) next.delete(conversationId);
+        else next.add(conversationId);
+        writeIdSet(favoritesKey(ownerId), next);
+        return next;
+      });
+    },
+    [ownerId],
+  );
+
+  const togglePin = useCallback(
+    (conversationId: string) => {
+      if (!ownerId) return;
+      setPinned((previous) => {
+        const next = new Set(previous);
+        if (next.has(conversationId)) next.delete(conversationId);
+        else next.add(conversationId);
+        writeIdSet(pinnedKey(ownerId), next);
+        return next;
+      });
+    },
+    [ownerId],
+  );
+
+  const handleDraftChange = useCallback((conversationId: string, text: string) => {
+    setDrafts((previous) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        if (!(conversationId in previous)) return previous;
+        const next = { ...previous };
+        delete next[conversationId];
+        return next;
+      }
+      if (previous[conversationId] === text) return previous;
+      return { ...previous, [conversationId]: text };
+    });
+  }, []);
+
   const startConversation = useCallback(async (username: string) => {
     const response = await api.post<{ conversation: Conversation }>('/api/conversations', {
       username,
@@ -589,11 +660,18 @@ export function ChatShell() {
     );
     setActiveId(response.conversation.id);
     setMobileThreadOpen(true);
+    setFilter('all');
+    setInfoOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
   }, []);
 
   const selectConversation = useCallback((id: string) => {
     setActiveId(id);
     setMobileThreadOpen(true);
+    setInfoOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
   }, []);
 
   const openNewChat = useCallback((query?: string) => {
@@ -603,6 +681,9 @@ export function ChatShell() {
 
   const handleBack = useCallback(() => {
     setMobileThreadOpen(false);
+    setInfoOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
     const conversationId = activeIdRef.current;
     if (conversationId) {
       void api.post(`/api/conversations/${conversationId}/purge`).catch(() => undefined);
@@ -616,6 +697,76 @@ export function ChatShell() {
     logout();
     router.replace('/login');
   }, [logout, router]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setMatchIndex(0);
+  }, []);
+
+  const toggleSearch = useCallback(() => {
+    if (searchOpen) {
+      closeSearch();
+      return;
+    }
+    setSearchOpen(true);
+  }, [closeSearch, searchOpen]);
+
+  const handleSearchQueryChange = useCallback((value: string) => {
+    setSearchQuery(value);
+    setMatchIndex(0);
+  }, []);
+
+  const previousMatch = useCallback(() => {
+    if (matches.length === 0) return;
+    setMatchIndex((current) => (current - 1 + matches.length) % matches.length);
+  }, [matches.length]);
+
+  const nextMatch = useCallback(() => {
+    if (matches.length === 0) return;
+    setMatchIndex((current) => (current + 1) % matches.length);
+  }, [matches.length]);
+
+  const retryMessages = useCallback(() => {
+    setMessageReloadKey((current) => current + 1);
+  }, []);
+
+  /* Global shortcuts. Ctrl/Cmd+K is scoped to the visible surface. */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+
+      const key = event.key.toLowerCase();
+
+      if (key === 'k' && !event.shiftKey) {
+        event.preventDefault();
+        const narrow = window.matchMedia('(max-width: 767px)').matches;
+        if (activeIdRef.current && (focusMode || (narrow && mobileThreadOpen))) {
+          setSearchOpen(true);
+        } else {
+          setSearchFocusSignal((current) => current + 1);
+        }
+        return;
+      }
+
+      if (key === 'n' && !event.shiftKey) {
+        event.preventDefault();
+        setNewChatQuery('');
+        setNewChatOpen(true);
+        return;
+      }
+
+      if (key === 'f' && event.shiftKey) {
+        event.preventDefault();
+        setFocusMode((current) => !current);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [focusMode, mobileThreadOpen]);
 
   const {
     call,
@@ -634,12 +785,14 @@ export function ChatShell() {
   });
 
   const handleAudioCall = useCallback(() => {
+    setInfoOpen(false);
     if (activeConversationRef.current) {
       void startCall(activeConversationRef.current, 'audio');
     }
   }, [startCall]);
 
   const handleVideoCall = useCallback(() => {
+    setInfoOpen(false);
     if (activeConversationRef.current) {
       void startCall(activeConversationRef.current, 'video');
     }
@@ -650,13 +803,14 @@ export function ChatShell() {
   const peerOnline = activeConversation
     ? onlineIds.has(activeConversation.other.id) || activeConversation.other.online
     : false;
+  const activeTyping = activeConversation ? !!typing[activeConversation.id] : false;
 
   return (
     <div className="flex h-dvh overflow-hidden bg-app">
       <div
         className={cn(
-          'min-h-0 w-full shrink-0 border-r border-line md:flex md:w-[330px] lg:w-[348px]',
-          mobileThreadOpen ? 'hidden' : 'flex',
+          'min-h-0 w-full shrink-0 border-r border-line md:w-[340px] lg:w-[372px] xl:w-[400px]',
+          focusMode ? 'hidden' : mobileThreadOpen ? 'hidden md:flex' : 'flex',
         )}
       >
         <Sidebar
@@ -665,10 +819,17 @@ export function ChatShell() {
           activeId={activeId}
           onlineIds={onlineIds}
           typing={typing}
+          drafts={drafts}
+          favorites={favorites}
+          pinned={pinned}
           loading={loadingConversations}
           connected={connected}
+          filter={filter}
+          focusSearchSignal={searchFocusSignal}
+          onFilterChange={setFilter}
           onSelect={selectConversation}
           onNewChat={openNewChat}
+          onProfile={() => setProfileOpen(true)}
           onLogout={handleLogout}
           className="w-full"
         />
@@ -676,53 +837,100 @@ export function ChatShell() {
 
       <main
         className={cn(
-          'min-w-0 flex-1 flex-col',
-          mobileThreadOpen ? 'flex' : 'hidden md:flex',
+          'relative flex min-h-0 min-w-0 flex-1 overflow-hidden',
+          focusMode ? 'flex' : mobileThreadOpen ? 'flex' : 'hidden md:flex',
         )}
       >
-        {activeConversation ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {activeConversation ? (
+            <>
+              <ChatHeader
+                conversation={activeConversation}
+                online={peerOnline}
+                typing={activeTyping}
+                connected={connected}
+                focusMode={focusMode}
+                searchOpen={searchOpen}
+                searchQuery={searchQuery}
+                matchCount={matches.length}
+                matchIndex={safeMatchIndex}
+                onToggleSearch={toggleSearch}
+                onSearchQueryChange={handleSearchQueryChange}
+                onCloseSearch={closeSearch}
+                onPrevMatch={previousMatch}
+                onNextMatch={nextMatch}
+                onStartAudio={handleAudioCall}
+                onStartVideo={handleVideoCall}
+                onOpenInfo={() => setInfoOpen((current) => !current)}
+                onToggleFocus={() => setFocusMode((current) => !current)}
+                onBack={handleBack}
+              />
+
+              <div
+                className={cn(
+                  'flex min-h-0 flex-1 flex-col transition-colors duration-500',
+                  activeConversation.modes.vanish && 'vanish-canvas',
+                )}
+              >
+                <MessageList
+                  conversationId={activeConversation.id}
+                  messages={messages}
+                  me={user}
+                  other={activeConversation.other}
+                  loading={loadingMessages}
+                  typing={activeTyping}
+                  error={messageError}
+                  searchQuery={searchQuery}
+                  activeMatchId={activeMatch?.id || null}
+                  onRetry={retryMessages}
+                  onReact={reactToMessage}
+                />
+                <Composer
+                  key={activeConversation.id}
+                  conversationId={activeConversation.id}
+                  draftOwnerId={user.id}
+                  vanish={activeConversation.modes.vanish}
+                  anonymity={activeConversation.modes.anonymity}
+                  onSend={sendMessage}
+                  onTypingChange={handleTypingChange}
+                  onDraftChange={handleDraftChange}
+                />
+              </div>
+            </>
+          ) : (
+            <WelcomePane onNewChat={() => openNewChat()} />
+          )}
+        </div>
+
+        {infoOpen && activeConversation && (
           <>
-            <ChatHeader
+            <button
+              type="button"
+              onClick={() => setInfoOpen(false)}
+              className="fixed inset-0 z-[64] bg-slate-950/45 backdrop-blur-[2px] xl:hidden"
+              aria-label="Close contact details"
+            />
+            <ContactPanel
               conversation={activeConversation}
-              me={user}
+              messages={messages}
               online={peerOnline}
-              typing={!!typing[activeConversation.id]}
-              connected={connected}
+              typing={activeTyping}
+              favorite={favorites.has(activeConversation.id)}
+              pinned={pinned.has(activeConversation.id)}
+              onClose={() => setInfoOpen(false)}
+              onStartAudio={handleAudioCall}
+              onStartVideo={handleVideoCall}
               onToggleAnonymity={() =>
                 void updateModes({ anonymity: !activeConversation.modes.anonymity })
               }
-              onToggleVanish={() => void updateModes({ vanish: !activeConversation.modes.vanish })}
-              onStartAudio={handleAudioCall}
-              onStartVideo={handleVideoCall}
-              onBack={handleBack}
+              onToggleVanish={() =>
+                void updateModes({ vanish: !activeConversation.modes.vanish })
+              }
+              onToggleFavorite={() => toggleFavorite(activeConversation.id)}
+              onTogglePin={() => togglePin(activeConversation.id)}
+              className="fixed inset-y-0 right-0 z-[65] w-[min(22rem,100vw)] max-w-full shadow-[0_30px_80px_-30px_rgba(2,6,23,0.65)] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shadow-none"
             />
-
-            <div
-              className={cn(
-                'flex min-h-0 flex-1 flex-col transition-colors duration-500',
-                activeConversation.modes.vanish && 'vanish-canvas',
-              )}
-            >
-              <MessageList
-                conversationId={activeConversation.id}
-                messages={messages}
-                me={user}
-                other={activeConversation.other}
-                loading={loadingMessages}
-                typing={!!typing[activeConversation.id]}
-                onReact={reactToMessage}
-              />
-              <Composer
-                key={activeConversation.id}
-                vanish={activeConversation.modes.vanish}
-                anonymity={activeConversation.modes.anonymity}
-                onSend={sendMessage}
-                onTypingChange={handleTypingChange}
-              />
-            </div>
           </>
-        ) : (
-          <EmptyPane onNewChat={() => openNewChat()} />
         )}
       </main>
 
@@ -736,6 +944,13 @@ export function ChatShell() {
         onStart={startConversation}
       />
 
+      <ProfileDialog
+        open={profileOpen}
+        user={user}
+        onClose={() => setProfileOpen(false)}
+        onLogout={handleLogout}
+      />
+
       <CallOverlay
         call={call}
         localStream={localStream}
@@ -746,14 +961,6 @@ export function ChatShell() {
         onToggleMute={toggleMute}
         onToggleCamera={toggleCamera}
       />
-
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] hidden -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-panel/90 px-3 py-1.5 text-[9px] text-faint shadow-sm backdrop-blur md:flex">
-        <Ghost size={10} />
-        Privacy controls are per-thread
-        <span className="h-2.5 w-px bg-line" />
-        <ShieldCheck size={10} />
-        Identity masking enforced server-side
-      </div>
     </div>
   );
 }

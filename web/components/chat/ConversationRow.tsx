@@ -1,6 +1,6 @@
 'use client';
 
-import { Flame, FileText, Image as ImageIcon, Mic, Video } from 'lucide-react';
+import { FileText, Flame, Image as ImageIcon, Mic, Pin, Star, Video } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { formatSnippetTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -16,7 +16,7 @@ function messagePreview(message: Message): string {
 }
 
 function KindIcon({ kind }: { kind: Message['kind'] }) {
-  const props = { size: 11, className: 'shrink-0 text-faint' };
+  const props = { size: 12, className: 'shrink-0 text-faint' };
   if (kind === 'image') return <ImageIcon {...props} />;
   if (kind === 'audio') return <Mic {...props} />;
   if (kind === 'video') return <Video {...props} />;
@@ -30,6 +30,9 @@ interface ConversationRowProps {
   active: boolean;
   online: boolean;
   typing: boolean;
+  draft?: string;
+  favorite?: boolean;
+  pinned?: boolean;
   onSelect: () => void;
 }
 
@@ -39,76 +42,81 @@ export function ConversationRow({
   active,
   online,
   typing,
+  draft,
+  favorite,
+  pinned,
   onSelect,
 }: ConversationRowProps) {
   const { other, lastMessage, unreadCount } = conversation;
-  const preview = lastMessage ? messagePreview(lastMessage) : 'No messages yet';
-  const isMine = lastMessage?.senderId === meId;
   const unread = unreadCount > 0;
+  const isMine = lastMessage?.senderId === meId;
+  const preview = lastMessage ? messagePreview(lastMessage) : 'No messages yet';
+  const draftText = draft?.trim();
 
   return (
     <button
       type="button"
       onClick={onSelect}
       className={cn(
-        'group relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors',
-        active ? 'bg-accent-soft' : 'hover:bg-panel-2',
+        'group relative flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
+        active ? 'bg-panel-2' : 'hover:bg-panel-2/70',
       )}
       aria-current={active ? 'true' : undefined}
+      aria-label={`Open conversation with ${other.displayName}${unread ? `, ${unreadCount} unread` : ''}`}
     >
       {active && (
-        <span className="absolute left-0 top-1/2 h-6 w-[2.5px] -translate-y-1/2 rounded-full bg-accent" />
+        <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-accent" aria-hidden="true" />
       )}
 
-      <Avatar user={other} size="md" online={online} />
+      <Avatar user={other} size="lg" online={online} />
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
           <span
             className={cn(
-              'truncate text-[12.5px] tracking-[-0.005em]',
-              unread ? 'font-semibold text-ink' : 'font-medium text-ink',
+              'truncate text-[13.5px] tracking-[-0.005em] text-ink',
+              unread ? 'font-semibold' : 'font-medium',
             )}
           >
             {other.displayName}
           </span>
-          {lastMessage && (
-            <span className="ml-auto shrink-0 text-[9.5px] tabular-nums text-faint">
-              {formatSnippetTime(lastMessage.createdAt)}
-            </span>
-          )}
-        </div>
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-faint">
+            {pinned && <Pin size={10} className="text-faint" aria-label="Pinned" />}
+            {favorite && <Star size={10} className="fill-amber-400 text-amber-400" aria-label="Favorite" />}
+            {lastMessage && <span>{formatSnippetTime(lastMessage.createdAt)}</span>}
+          </span>
+        </span>
 
-        <div className="mt-0.5 flex items-center gap-1.5">
+        <span className="mt-0.5 flex min-h-[18px] items-center gap-1.5">
           {typing ? (
-            <span className="truncate text-[11px] font-medium text-accent">typing…</span>
+            <span className="truncate text-[12px] font-medium text-accent">typing…</span>
+          ) : draftText ? (
+            <span className="truncate text-[12px] text-accent">
+              <span className="font-medium">Draft:</span> {draftText}
+            </span>
           ) : (
             <>
-              {lastMessage && lastMessage.kind !== 'text' && (
-                <KindIcon kind={lastMessage.kind} />
-              )}
-              {lastMessage?.ephemeral && (
-                <Flame size={10} className="shrink-0 text-amber-500/80" />
-              )}
+              {lastMessage && lastMessage.kind !== 'text' && <KindIcon kind={lastMessage.kind} />}
+              {lastMessage?.ephemeral && <Flame size={11} className="shrink-0 text-amber-500/90" />}
               <span
                 className={cn(
-                  'truncate text-[11px]',
+                  'truncate text-[12px]',
                   unread ? 'font-medium text-ink/75' : 'text-muted',
                 )}
               >
-                {isMine && lastMessage?.kind === 'text' ? 'You: ' : ''}
+                {isMine && lastMessage ? 'You: ' : ''}
                 {preview}
               </span>
             </>
           )}
 
           {unread && (
-            <span className="ml-auto flex h-[17px] min-w-[17px] shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold tabular-nums text-white">
-              {unreadCount > 9 ? '9+' : unreadCount}
+            <span className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[9.5px] font-bold tabular-nums text-accent-ink">
+              {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}
-        </div>
-      </div>
+        </span>
+      </span>
     </button>
   );
 }

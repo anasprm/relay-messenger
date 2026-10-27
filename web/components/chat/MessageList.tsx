@@ -1,15 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Lock, MessagesSquare } from 'lucide-react';
+import { ArrowDown, Download, Lock, MessagesSquare, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { mediaUrl } from '@/lib/api';
-import {
-  formatBytes,
-  formatDayLabel,
-  isSameDay,
-} from '@/lib/format';
+import { formatBytes, formatDayLabel, isSameDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Attachment, Message, User } from '@/lib/types';
 import { MessageBubble } from './MessageBubble';
@@ -21,6 +17,10 @@ interface MessageListProps {
   other: User | null;
   loading: boolean;
   typing: boolean;
+  error?: string | null;
+  searchQuery?: string;
+  activeMatchId?: string | null;
+  onRetry?: () => void;
   onReact: (messageId: string, emoji: string) => void;
 }
 
@@ -29,8 +29,8 @@ function MessageSkeleton({ mine }: { mine: boolean }) {
     <div className={cn('flex w-full gap-2.5', mine ? 'justify-end' : 'justify-start')}>
       {!mine && <div className="skeleton h-8 w-8 rounded-full" />}
       <div className={cn('flex flex-col gap-2', mine ? 'items-end' : 'items-start')}>
-        <div className={cn('skeleton h-11 rounded-2xl', mine ? 'w-56' : 'w-64')} />
-        <div className={cn('skeleton h-9 rounded-2xl', mine ? 'w-40' : 'w-48')} />
+        <div className={cn('skeleton h-10 rounded-2xl', mine ? 'w-52' : 'w-64')} />
+        <div className={cn('skeleton h-8 rounded-2xl', mine ? 'w-36' : 'w-44')} />
       </div>
     </div>
   );
@@ -43,28 +43,72 @@ export function MessageList({
   other,
   loading,
   typing,
+  error,
+  searchQuery = '',
+  activeMatchId,
+  onRetry,
   onReact,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const lastCountRef = useRef(0);
+  const [atBottom, setAtBottom] = useState(true);
+  const [unseen, setUnseen] = useState(0);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
 
   useEffect(() => {
     stickRef.current = true;
+    setAtBottom(true);
+    setUnseen(0);
+    lastCountRef.current = 0;
   }, [conversationId]);
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    if (!stickRef.current) return;
-    element.scrollTop = element.scrollHeight;
-  }, [loading, messages.length, typing]);
+
+    const grew = messages.length > lastCountRef.current;
+    lastCountRef.current = messages.length;
+
+    if (stickRef.current) {
+      element.scrollTop = element.scrollHeight;
+      setAtBottom(true);
+      setUnseen(0);
+    } else if (grew) {
+      const latest = messages[messages.length - 1];
+      if (latest && latest.senderId !== me.id) {
+        setUnseen((count) => count + 1);
+      }
+    }
+  }, [loading, me.id, messages, typing]);
+
+  useEffect(() => {
+    if (!activeMatchId) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    const target = element.querySelector<HTMLElement>(`[data-message-id="${activeMatchId}"]`);
+    if (!target) return;
+    stickRef.current = false;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [activeMatchId]);
 
   function handleScroll() {
     const element = scrollRef.current;
     if (!element) return;
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
-    stickRef.current = distance < 160;
+    const nearBottom = distance < 120;
+    stickRef.current = nearBottom;
+    setAtBottom(nearBottom);
+    if (nearBottom) setUnseen(0);
+  }
+
+  function jumpToLatest() {
+    const element = scrollRef.current;
+    if (!element) return;
+    stickRef.current = true;
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+    setAtBottom(true);
+    setUnseen(0);
   }
 
   const rendered = useMemo(
@@ -81,8 +125,7 @@ export function MessageList({
         const gapMinutes = previous
           ? (new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime()) / 60_000
           : Infinity;
-        const groupStart =
-          !previous || newDay || previousKey !== senderKey || gapMinutes > 5;
+        const groupStart = !previous || newDay || previousKey !== senderKey || gapMinutes > 5;
 
         return { message, newDay, groupStart };
       }),
@@ -90,75 +133,116 @@ export function MessageList({
   );
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      className="scrollbar-thin relative flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-7"
-    >
-      {loading ? (
-        <div className="mx-auto flex max-w-4xl flex-col gap-6 py-4">
-          <MessageSkeleton mine={false} />
-          <MessageSkeleton mine />
-          <MessageSkeleton mine={false} />
-          <MessageSkeleton mine />
-        </div>
-      ) : messages.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-panel text-accent shadow-sm">
-            <MessagesSquare size={24} />
-          </span>
-          <div>
-            <h3 className="text-sm font-semibold text-ink">
-              Start the conversation{other ? ` with ${other.displayName}` : ''}
-            </h3>
-            <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-muted">
-              Messages, voice notes, and files are delivered instantly over your workspace relay.
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        role="log"
+        aria-label="Message history"
+        className="chat-wallpaper scrollbar-thin h-full overflow-y-auto overflow-x-hidden"
+      >
+        {loading ? (
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col justify-center gap-6 px-4 py-8 sm:px-6">
+            <MessageSkeleton mine={false} />
+            <MessageSkeleton mine />
+            <MessageSkeleton mine={false} />
+            <MessageSkeleton mine />
+          </div>
+        ) : error ? (
+          <div className="flex min-h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-panel text-danger shadow-sm">
+              <TriangleAlert size={22} />
+            </span>
+            <h3 className="text-[13.5px] font-semibold text-ink">Could not load this conversation</h3>
+            <p className="max-w-sm text-[11.5px] leading-relaxed text-muted">{error}</p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-panel px-3 text-[11px] font-medium text-ink transition-colors hover:border-accent/40 hover:text-accent"
+              >
+                <RefreshCw size={12} />
+                Try again
+              </button>
+            )}
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex min-h-full flex-col items-center justify-center gap-3.5 px-6 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-panel text-accent shadow-sm">
+              <MessagesSquare size={24} />
+            </span>
+            <div>
+              <h3 className="text-[14px] font-semibold text-ink">
+                {other ? `Say hello to ${other.displayName}` : 'No messages yet'}
+              </h3>
+              <p className="mx-auto mt-1.5 max-w-xs text-[11.5px] leading-relaxed text-muted">
+                Messages, voice notes, and files are delivered instantly over your workspace relay.
+              </p>
+            </div>
+            <p className="flex items-center gap-1.5 rounded-full border border-line bg-panel/80 px-3 py-1 text-[10px] text-faint backdrop-blur">
+              <Lock size={10} />
+              Private to the people in this thread
             </p>
           </div>
-          <p className="flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1 text-[10px] text-faint">
-            <Lock size={10} />
-            End-to-end session channel
-          </p>
-        </div>
-      ) : (
-        <div className="mx-auto flex max-w-4xl flex-col pb-2">
-          {rendered.map(({ message, newDay, groupStart }) => (
-            <div key={message.id}>
-              {newDay && (
-                <div className="sticky top-0 z-10 flex justify-center py-3">
-                  <span className="rounded-full border border-line bg-panel/90 px-2.5 py-1 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-faint shadow-sm backdrop-blur">
-                    {formatDayLabel(message.createdAt)}
-                  </span>
-                </div>
-              )}
-              <MessageBubble
-                message={message}
-                meId={me.id}
-                mine={message.senderId === me.id}
-                groupStart={groupStart}
-                onReact={onReact}
-                onOpenImage={setLightbox}
-              />
-            </div>
-          ))}
-
-          {typing && other && (
-            <div className="mt-3 flex items-end gap-2.5">
-              <Avatar user={other} size="sm" />
-              <div className="flex h-9 items-center gap-1 rounded-2xl rounded-bl-md border border-line bg-bubble px-3.5 shadow-sm">
-                <span className="h-1 w-1 animate-blink rounded-full bg-faint" />
-                <span
-                  className="h-1 w-1 animate-blink rounded-full bg-faint"
-                  style={{ animationDelay: '0.18s' }}
-                />
-                <span
-                  className="h-1 w-1 animate-blink rounded-full bg-faint"
-                  style={{ animationDelay: '0.36s' }}
+        ) : (
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col justify-end px-2 pb-2 pt-4 sm:px-6">
+            {rendered.map(({ message, newDay, groupStart }) => (
+              <div key={message.id} data-message-id={message.id}>
+                {newDay && (
+                  <div className="sticky top-2 z-10 flex justify-center py-2">
+                    <span className="rounded-md bg-panel/90 px-2.5 py-1 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted shadow-sm backdrop-blur">
+                      {formatDayLabel(message.createdAt)}
+                    </span>
+                  </div>
+                )}
+                <MessageBubble
+                  message={message}
+                  meId={me.id}
+                  mine={message.senderId === me.id}
+                  groupStart={groupStart}
+                  searchQuery={searchQuery}
+                  activeMatch={message.id === activeMatchId}
+                  onReact={onReact}
+                  onOpenImage={setLightbox}
                 />
               </div>
-            </div>
+            ))}
+
+            {typing && other && (
+              <div className="mt-3 flex items-end gap-2">
+                <Avatar user={other} size="sm" />
+                <div className="flex h-9 items-center gap-1 rounded-[10px] rounded-tl-[2px] bg-bubble px-3.5 shadow-sm">
+                  <span className="h-1 w-1 animate-blink rounded-full bg-faint" />
+                  <span
+                    className="h-1 w-1 animate-blink rounded-full bg-faint"
+                    style={{ animationDelay: '0.18s' }}
+                  />
+                  <span
+                    className="h-1 w-1 animate-blink rounded-full bg-faint"
+                    style={{ animationDelay: '0.36s' }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!loading && !error && messages.length > 0 && !atBottom && (
+        <button
+          type="button"
+          onClick={jumpToLatest}
+          className="absolute bottom-4 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-line bg-panel text-muted shadow-[0_10px_30px_-10px_rgba(15,23,42,0.4)] transition-colors hover:text-ink sm:right-5"
+          aria-label="Jump to latest messages"
+          title="Jump to latest"
+        >
+          <ArrowDown size={17} />
+          {unseen > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold tabular-nums text-accent-ink">
+              {unseen > 9 ? '9+' : unseen}
+            </span>
           )}
-        </div>
+        </button>
       )}
 
       <Modal
@@ -178,7 +262,7 @@ export function MessageList({
             <img
               src={mediaUrl(lightbox.url)}
               alt={lightbox.name}
-              className="mx-auto max-h-[70vh] w-auto rounded-lg object-contain"
+              className="mx-auto max-h-[70dvh] w-auto rounded-lg object-contain"
             />
             <div className="flex justify-end px-1 pt-3">
               <a
@@ -186,7 +270,7 @@ export function MessageList({
                 download={lightbox.name}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-[11px] font-medium text-ink transition-colors hover:border-line-strong"
+                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1.5 text-[11px] font-medium text-ink transition-colors hover:border-line-strong"
               >
                 <Download size={12} />
                 Download original

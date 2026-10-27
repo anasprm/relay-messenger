@@ -50,7 +50,7 @@ export function UiStyleToggle({
             'inline-flex h-7 items-center justify-center gap-1.5 rounded-md text-[10.5px] font-medium transition-colors',
             compact ? 'w-7 px-0' : 'px-2',
             active === value
-              ? 'bg-panel-2 text-ink shadow-sm'
+              ? 'bg-accent-soft text-accent shadow-sm'
               : 'text-faint hover:text-ink',
           )}
         >

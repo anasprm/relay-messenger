@@ -2,12 +2,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { UPLOAD_DIR } from './config.js';
-import { getStorageBucket } from './firebase.js';
+import { firebaseStatus, getStorageBucket } from './firebase.js';
 
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.ps1', '.vbs',
   '.jar', '.js', '.html', '.htm', '.dll', '.cpl', '.hta',
 ]);
+
+/** Ten years — long enough that a stored message does not lose its media. */
+const SUPABASE_SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 10;
 
 export function extensionFor(filename = '') {
   return path.extname(filename).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 12);
@@ -17,15 +20,104 @@ export function isBlockedExtension(extension) {
   return BLOCKED_EXTENSIONS.has(extension);
 }
 
+function supabaseConfig() {
+  const url = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    ''
+  ).trim();
+  const bucket = (process.env.SUPABASE_STORAGE_BUCKET || 'relay-uploads').trim();
+
+  if (!url || !key || !bucket) return null;
+  return { url, key, bucket };
+}
+
+function encodeObjectPath(objectPath) {
+  return objectPath.split('/').map(encodeURIComponent).join('/');
+}
+
 /**
- * Persists an uploaded buffer in Firebase Storage when a bucket is available,
- * otherwise falls back to local disk so the app remains usable.
+ * Supabase Storage keeps uploads outside the API container, so they survive
+ * Render restarts and redeploys. Objects are signed for long-lived read access
+ * so the bucket can stay private.
+ */
+async function storeSupabase(buffer, { filename, contentType, folder }) {
+  const config = supabaseConfig();
+  if (!config) return null;
+
+  const objectPath = `${folder}/${filename}`;
+  const encodedPath = encodeObjectPath(objectPath);
+  const uploadUrl = `${config.url}/storage/v1/object/${config.bucket}/${encodedPath}`;
+
+  const upload = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.key}`,
+      'Content-Type': contentType,
+      'x-upsert': 'true',
+      'cache-control': 'max-age=31536000',
+    },
+    body: buffer,
+  });
+
+  if (!upload.ok) {
+    const detail = await upload.text().catch(() => '');
+    throw new Error(
+      `Supabase upload failed (${upload.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+    );
+  }
+
+  const sign = await fetch(
+    `${config.url}/storage/v1/object/sign/${config.bucket}/${encodedPath}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ expiresIn: SUPABASE_SIGNED_URL_TTL_SECONDS }),
+    },
+  );
+
+  if (!sign.ok) {
+    const detail = await sign.text().catch(() => '');
+    throw new Error(
+      `Supabase signed URL failed (${sign.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+    );
+  }
+
+  const payload = await sign.json().catch(() => null);
+  const signed = payload?.signedURL || payload?.signedUrl;
+  if (!signed || typeof signed !== 'string') {
+    throw new Error('Supabase signed URL response was missing signedURL.');
+  }
+
+  const url = signed.startsWith('http')
+    ? signed
+    : `${config.url}/storage/v1${signed.startsWith('/') ? '' : '/'}${signed}`;
+
+  return { url, path: objectPath, storage: 'supabase' };
+}
+
+/**
+ * Persists an uploaded buffer in Supabase Storage, then Firebase Storage, and
+ * finally local disk. The local fallback keeps development working but is
+ * erased whenever a free Render service restarts.
  */
 export async function storeUpload(buffer, { extension = '', contentType = 'application/octet-stream', folder = 'uploads' } = {}) {
   const safeExtension = extension && !isBlockedExtension(extension) ? extension : '';
   const filename = `${crypto.randomUUID()}${safeExtension}`;
-  const bucket = await getStorageBucket();
 
+  if (supabaseConfig()) {
+    try {
+      return await storeSupabase(buffer, { filename, contentType, folder });
+    } catch (error) {
+      console.warn(`[storage] Supabase upload failed (${error.message}); trying the next provider.`);
+    }
+  }
+
+  const bucket = await getStorageBucket();
   if (bucket) {
     try {
       const objectPath = `${folder}/${filename}`;
@@ -54,5 +146,25 @@ export async function storeUpload(buffer, { extension = '', contentType = 'appli
     url: `/uploads/${filename}`,
     path: filename,
     storage: 'local',
+  };
+}
+
+export function storageStatus() {
+  const config = supabaseConfig();
+  if (config) {
+    return {
+      provider: 'supabase',
+      bucket: config.bucket,
+      durable: true,
+      error: null,
+    };
+  }
+
+  const firebase = firebaseStatus();
+  return {
+    provider: firebase.storage,
+    bucket: firebase.storageBucket,
+    durable: firebase.storage === 'firebase',
+    error: firebase.storageError,
   };
 }

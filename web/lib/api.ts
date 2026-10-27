@@ -90,6 +90,7 @@ export function mediaUrl(path: string | null | undefined): string {
 
 interface UploadOptions {
   filename: string;
+  contentType?: string;
   duration?: number;
   width?: number;
   height?: number;
@@ -102,7 +103,13 @@ export function uploadAttachment(
 ): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    form.append('file', file, options.filename);
+    // Some browsers report recorded MediaRecorder blobs as text/plain. Force
+    // the expected type so the API stores the right kind and MIME metadata.
+    const payload =
+      options.contentType && file.type !== options.contentType
+        ? new Blob([file], { type: options.contentType })
+        : file;
+    form.append('file', payload, options.filename);
     if (options.duration !== undefined) form.append('duration', String(options.duration));
     if (options.width !== undefined) form.append('width', String(options.width));
     if (options.height !== undefined) form.append('height', String(options.height));

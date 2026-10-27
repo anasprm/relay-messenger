@@ -107,10 +107,10 @@ export function CallOverlay({
   const active = call.status === 'active' || call.status === 'connecting';
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col bg-[#070a12] text-white">
+    <div className="fixed inset-0 z-[80] flex flex-col bg-[#06110e] text-white">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-32 top-0 h-[28rem] w-[28rem] rounded-full bg-indigo-600/20 blur-[120px]" />
-        <div className="absolute -right-24 bottom-0 h-[30rem] w-[30rem] rounded-full bg-violet-600/15 blur-[130px]" />
+        <div className="absolute -left-32 top-0 h-[28rem] w-[28rem] rounded-full bg-emerald-500/20 blur-[120px]" />
+        <div className="absolute -right-24 bottom-0 h-[30rem] w-[30rem] rounded-full bg-teal-500/15 blur-[130px]" />
         <div className="brand-grid absolute inset-0 opacity-[0.18]" />
       </div>
 
@@ -120,13 +120,13 @@ export function CallOverlay({
           <Avatar user={call.peer} size="sm" />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white">{call.peer.displayName}</p>
-            <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <p className="flex items-center gap-1.5 text-[11px] text-white/55">
               <ShieldCheck size={11} className="text-emerald-400" />
               Peer-to-peer · encrypted media
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+        <div className="flex items-center gap-3 text-[11px] text-white/55">
           {active && call.status === 'active' && (
             <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono">
               <CallTimer startedAt={call.startedAt} />
@@ -147,9 +147,9 @@ export function CallOverlay({
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-5">
                 <div className="relative">
-                  <span className="absolute inset-0 rounded-full border border-indigo-400/30" />
+                  <span className="absolute inset-0 rounded-full border border-emerald-400/30" />
                   <span
-                    className="absolute inset-0 rounded-full border border-indigo-400/20"
+                    className="absolute inset-0 rounded-full border border-emerald-400/20"
                     style={{ animation: 'pulse-ring 2.6s ease-out infinite' }}
                   />
                   <Avatar user={call.peer} size="2xl" />
@@ -158,7 +158,7 @@ export function CallOverlay({
                   <p className="text-xl font-semibold tracking-tight text-white">
                     {call.peer.displayName}
                   </p>
-                  <p className="mt-1.5 text-xs text-slate-400">
+                  <p className="mt-1.5 text-xs text-white/55">
                     {call.status === 'connecting' ? 'Connecting…' : 'Audio connected'}
                   </p>
                 </div>
@@ -167,7 +167,7 @@ export function CallOverlay({
             )}
 
             {call.kind === 'video' && (
-              <div className="absolute bottom-4 right-4 h-32 w-24 overflow-hidden rounded-xl border border-white/15 bg-slate-900 shadow-2xl sm:h-40 sm:w-28">
+              <div className="absolute bottom-4 right-4 h-32 w-24 overflow-hidden rounded-xl border border-white/15 bg-black/60 shadow-2xl sm:h-40 sm:w-28">
                 {localStream && call.cameraOn ? (
                   <StreamVideo
                     stream={localStream}
@@ -176,7 +176,7 @@ export function CallOverlay({
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-slate-900 text-[10px] text-slate-400">
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-black/60 text-[10px] text-white/55">
                     <VideoOff size={16} />
                     Camera off
                   </div>
@@ -185,7 +185,7 @@ export function CallOverlay({
             )}
 
             {call.status === 'connecting' && (
-              <div className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-slate-950/50 py-2 text-[11px] text-slate-300 backdrop-blur">
+              <div className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-black/50 py-2 text-[11px] text-white/70 backdrop-blur">
                 <Loader2 size={12} className="animate-spin" />
                 Establishing secure media…
               </div>
@@ -195,22 +195,22 @@ export function CallOverlay({
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.04] p-8 text-center shadow-[0_40px_100px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl animate-pop-in">
             <div className="relative mx-auto w-fit">
               <span
-                className="absolute inset-0 rounded-full border border-indigo-400/30"
+                className="absolute inset-0 rounded-full border border-emerald-400/30"
                 style={{ animation: 'pulse-ring 2s ease-out infinite' }}
               />
               <span
-                className="absolute inset-0 rounded-full border border-indigo-400/20"
+                className="absolute inset-0 rounded-full border border-emerald-400/20"
                 style={{ animation: 'pulse-ring 2s ease-out 0.8s infinite' }}
               />
               <Avatar user={call.peer} size="2xl" />
             </div>
-            <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-300">
+            <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">
               Incoming {call.kind} call
             </p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
               {call.peer.displayName}
             </h2>
-            <p className="mt-1 text-xs text-slate-400">@{call.peer.username} · Relay workspace</p>
+            <p className="mt-1 text-xs text-white/55">@{call.peer.username} · Relay workspace</p>
 
             <div className="mt-8 flex items-center justify-center gap-4">
               <button
@@ -225,14 +225,14 @@ export function CallOverlay({
               <button
                 type="button"
                 onClick={onAccept}
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-950/40 transition-transform hover:scale-105"
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-accent-ink shadow-lg shadow-emerald-950/40 transition-transform hover:scale-105"
                 aria-label="Accept call"
                 title="Accept"
               >
                 {call.kind === 'video' ? <Video size={21} /> : <Phone size={20} />}
               </button>
             </div>
-            <p className="mt-5 text-[10px] text-slate-500">
+            <p className="mt-5 text-[10px] text-white/40">
               Accepting will enable your {call.kind === 'video' ? 'camera and microphone' : 'microphone'}.
             </p>
           </div>
@@ -240,31 +240,31 @@ export function CallOverlay({
           <div className="flex flex-col items-center gap-6 text-center">
             <div className="relative">
               <span
-                className="absolute inset-0 rounded-full border border-indigo-400/30"
+                className="absolute inset-0 rounded-full border border-emerald-400/30"
                 style={{ animation: 'pulse-ring 2.4s ease-out infinite' }}
               />
               <span
-                className="absolute inset-0 rounded-full border border-indigo-400/20"
+                className="absolute inset-0 rounded-full border border-emerald-400/20"
                 style={{ animation: 'pulse-ring 2.4s ease-out 0.9s infinite' }}
               />
               <Avatar user={call.peer} size="2xl" />
             </div>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-300">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">
                 {call.kind} call
               </p>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
                 {call.peer.displayName}
               </h2>
-              <p className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-400">
+              <p className="mt-2 flex items-center justify-center gap-2 text-xs text-white/55">
                 <span className="flex gap-1">
-                  <span className="h-1 w-1 animate-blink rounded-full bg-slate-300" />
+                  <span className="h-1 w-1 animate-blink rounded-full bg-white/60" />
                   <span
-                    className="h-1 w-1 animate-blink rounded-full bg-slate-300"
+                    className="h-1 w-1 animate-blink rounded-full bg-white/60"
                     style={{ animationDelay: '0.2s' }}
                   />
                   <span
-                    className="h-1 w-1 animate-blink rounded-full bg-slate-300"
+                    className="h-1 w-1 animate-blink rounded-full bg-white/60"
                     style={{ animationDelay: '0.4s' }}
                   />
                 </span>
@@ -273,7 +273,7 @@ export function CallOverlay({
             </div>
 
             {call.kind === 'video' && localStream && (
-              <div className="h-36 w-28 overflow-hidden rounded-xl border border-white/15 bg-slate-900 shadow-2xl">
+              <div className="h-36 w-28 overflow-hidden rounded-xl border border-white/15 bg-black/60 shadow-2xl">
                 <StreamVideo
                   stream={localStream}
                   muted
@@ -289,7 +289,7 @@ export function CallOverlay({
       {/* Controls */}
       <footer className="relative z-10 flex items-center justify-center pb-8 pt-6">
         {incoming ? (
-          <div className="flex items-center gap-3 text-[11px] text-slate-500">
+          <div className="flex items-center gap-3 text-[11px] text-white/40">
             <ShieldCheck size={12} /> Incoming call is waiting for your response
           </div>
         ) : (

@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { CLIENT_ORIGINS, PORT, UPLOAD_DIR } from './config.js';
 import { dbStatus, getDb, initDb } from './db.js';
 import { firebaseStatus, probeStorage } from './firebase.js';
+import { storageStatus } from './storage.js';
 import { registerRealtime } from './realtime.js';
 import { ensureSeedAssets } from './seed.js';
 import authRoutes from './routes/auth.js';
@@ -41,6 +42,7 @@ app.get('/api/health', (_req, res) => {
     messages: db.messages.length,
     database: dbStatus(),
     firebase: firebaseStatus(),
+    storage: storageStatus(),
     uptimeSeconds: Math.round(process.uptime()),
   });
 });
@@ -56,8 +58,14 @@ app.use(
     );
     next();
   },
-  express.static(UPLOAD_DIR, { maxAge: '1h', dotfiles: 'deny', fallthrough: false }),
+  express.static(UPLOAD_DIR, { maxAge: '1h', dotfiles: 'deny', fallthrough: true }),
 );
+
+// A missing local upload is a normal 404, not an API crash. This also keeps the
+// client able to show a useful "attachment unavailable" state.
+app.use('/uploads', (_req, res) => {
+  res.status(404).json({ error: 'This attachment is no longer available on the server.' });
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -108,6 +116,7 @@ async function main() {
   const db = getDb();
   const status = firebaseStatus();
   const dbInfo = dbStatus();
+  const storage = storageStatus();
 
   server.listen(PORT, () => {
     console.log(`\n  Relay API listening on http://localhost:${PORT}`);
@@ -115,7 +124,15 @@ async function main() {
     console.log(
       `  Database: ${dbInfo.backend}${status.projectId ? ` (${status.projectId}/${status.databaseId})` : ''} · ${db.users.length} users · ${db.conversations.length} conversations · ${db.messages.length} messages`,
     );
-    console.log(`  Uploads: ${status.storage === 'firebase' ? `Firebase Storage (${status.storageBucket})` : 'local disk'}`);
+    console.log(
+      `  Uploads: ${
+        storage.provider === 'supabase'
+          ? `Supabase Storage (${storage.bucket})`
+          : storage.provider === 'firebase'
+            ? `Firebase Storage (${storage.bucket})`
+            : 'local disk (not durable)'
+      }`,
+    );
     console.log('  Demo login: demo / demo123\n');
   });
 }

@@ -18,9 +18,24 @@ export function isSafeUploadUrl(url) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') return false;
     if (parsed.username || parsed.password) return false;
-    if (parsed.hostname !== 'firebasestorage.googleapis.com') return false;
-    if (!parsed.pathname.startsWith('/v0/b/')) return false;
-    return !parsed.pathname.includes('..');
+    if (parsed.pathname.includes('..')) return false;
+
+    if (parsed.hostname === 'firebasestorage.googleapis.com') {
+      return parsed.pathname.startsWith('/v0/b/');
+    }
+
+    // Only the configured Supabase project may be used for attachments.
+    let supabaseHost = null;
+    try {
+      supabaseHost = new URL(process.env.SUPABASE_URL || '').hostname;
+    } catch {
+      supabaseHost = null;
+    }
+    if (supabaseHost && parsed.hostname === supabaseHost) {
+      return parsed.pathname.startsWith('/storage/v1/object/');
+    }
+
+    return false;
   } catch {
     return false;
   }

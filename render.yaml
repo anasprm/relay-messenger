@@ -21,6 +21,14 @@ services:
       # Paste the base64 service-account key in the Render dashboard.
       - key: FIREBASE_SERVICE_ACCOUNT_BASE64
         sync: false
+      # Optional durable upload storage (free tier, no card). When both are set,
+      # Supabase is used before Firebase Storage and local disk.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: relay-uploads
       # Set to the Vercel production URL after the web app is deployed.
       - key: CLIENT_ORIGIN
         sync: false

@@ -57,6 +57,7 @@ const DEFAULT_CLIENT_ORIGINS = [
   'http://127.0.0.1:3000',
   'https://relay-messengerpro.vercel.app',
   'https://relay-messenger-anasprm.vercel.app',
+  'https://valiyakath.vercel.app',
 ];
 
 export const CLIENT_ORIGINS = Array.from(

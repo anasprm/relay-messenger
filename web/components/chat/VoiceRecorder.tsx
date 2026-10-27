@@ -269,7 +269,7 @@ export function VoiceRecorder({
             onClick={() => blob && onSend(blob, duration)}
             disabled={!blob || busy}
             className={cn(
-              'flex h-10 shrink-0 items-center gap-2 rounded-full bg-accent px-4 text-xs font-semibold text-white transition-colors hover:bg-accent-hover',
+              'flex h-10 shrink-0 items-center gap-2 rounded-full bg-accent px-4 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent-hover',
               (!blob || busy) && 'opacity-60',
             )}
             aria-label="Send voice note"

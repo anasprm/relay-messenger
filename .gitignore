@@ -2,6 +2,8 @@ node_modules/
 .next/
 out/
 dist/
+*.tsbuildinfo
+.tmp-*
 
 # Runtime data — regenerated from seed on first boot
 server/data/

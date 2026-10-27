@@ -8,7 +8,7 @@ Relay is two services:
 | API + Socket.io (Express) | **Render** (free web service) | Auth, messages, uploads, presence, WebRTC signalling |
 | Data | **Firebase** (Spark plan) | Firestore database + rules |
 
-Firebase Storage is optional and only needs the Blaze plan when you want uploads to survive API restarts. Without it, uploads are written to the API's local disk and disappear when a free Render service spins down.
+Firebase Storage is optional and only needs the Blaze plan when you want uploads to survive API restarts. The recommended no-card option is **Supabase Storage** (free tier). Without either, uploads are written to the API's local disk and disappear when a free Render service spins down.
 
 > **Never commit** `server/data/firebase-service-account.json` or any base64 version of it. It is gitignored — keep it that way.
 
@@ -61,6 +61,32 @@ base64 -w0 server/data/firebase-service-account.json
 
 **`CLIENT_ORIGIN`** — set it to the Vercel URL once step 2 is done. Until then use a placeholder such as `https://example.vercel.app`; the API starts fine either way.
 
+### 1b-2. Durable uploads (recommended, free)
+
+Render's free disk is ephemeral: every restart erases uploaded media. Supabase Storage fixes that without a credit card.
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In **Storage**, create a **private** bucket named `relay-uploads`.
+3. Copy the project URL and the `service_role` key from **Project Settings → API**.
+4. Add these to the Render service:
+
+   | Variable | Value |
+   |---|---|
+   | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+   | `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` key (never expose this to the browser) |
+   | `SUPABASE_STORAGE_BUCKET` | `relay-uploads` |
+
+Uploads are stored privately and served through long-lived signed URLs, so the bucket never needs to be public. Confirm `/api/health` reports `"storage": { "provider": "supabase", "durable": true }`.
+
+To move existing local files into the new bucket and repair generic MIME types (for example a video note saved as `text/plain`), run this once from the repository root with the same variables present in `server/.env`:
+
+```bash
+node server/scripts/migrate-uploads.mjs
+```
+
+The script prints each migrated file and exits with code 2 if a referenced local file is genuinely missing.
+
+
 Also verify:
 
 | Variable | Value |
@@ -105,6 +131,16 @@ Open `https://<service>.onrender.com/api/health`. It should return `"ok": true` 
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `https://<service>.onrender.com` | Production, Preview, Development |
 
+   Optional but recommended for reliable calls on restrictive networks:
+
+| Name | Value |
+|---|---|
+| `NEXT_PUBLIC_TURN_URL` | `turn:turn.example.com:3478,turns:turn.example.com:5349` |
+| `NEXT_PUBLIC_TURN_USERNAME` | TURN username |
+| `NEXT_PUBLIC_TURN_CREDENTIAL` | TURN credential |
+
+   Without TURN, calls still use public STUN servers and work on most home and office networks. Corporate firewalls and symmetric NATs can block them.
+
 4. Deploy.
 
 The build runs `npm ci` at the repo root and `npm run build -w web`, then serves the statically generated pages.
@@ -117,7 +153,7 @@ The build runs `npm ci` at the repo root and `npm run build -w web`, then serves
 2. Render → `relay-api` → **Environment** → set:
 
    ```
-   CLIENT_ORIGIN=https://relay-messenger.vercel.app
+   CLIENT_ORIGIN=https://valiyakath.vercel.app
    ```
 
    Add multiple origins comma-separated if you also use a custom domain or stable preview URL:
@@ -164,13 +200,19 @@ If messages send but realtime does not update, the Socket.io origin is blocked. 
 
 ### Making uploads durable
 
-Enable the Blaze plan, create a Cloud Storage bucket, then add to Render:
+Preferred (free, no card): configure Supabase Storage as described in **1b-2**. Health then reports:
+
+```json
+"storage": { "provider": "supabase", "bucket": "relay-uploads", "durable": true }
+```
+
+Alternative: enable the Blaze plan, create a Cloud Storage bucket, then add to Render:
 
 ```
 FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app
 ```
 
-Restart the API and confirm `/api/health` reports `"storage": "firebase"`. No client changes are needed.
+Restart the API and confirm `/api/health` reports `"provider": "firebase"`. No client changes are needed.
 
 ---
 

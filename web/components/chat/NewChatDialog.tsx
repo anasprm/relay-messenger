@@ -174,7 +174,7 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
               disabled={!!startingName}
               className="mt-2 flex w-full items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft px-3 py-2.5 text-left transition-colors hover:border-accent/50"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
                 {startingName === term ? (
                   <Loader2 size={13} className="animate-spin" />
                 ) : (
