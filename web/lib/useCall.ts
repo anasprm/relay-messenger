@@ -99,7 +99,9 @@ async function microphonePermission(): Promise<PermissionNameState> {
 
 function blockedMessage(kind: CallKind): string {
   const target = kind === 'video' ? 'Camera and microphone access is' : 'Microphone access is';
-  return `${target} blocked for this site. Allow it from your browser's site permissions, then start the call again.`;
+  return `${target} blocked for this site. Open the site controls next to the address bar, allow ${
+    kind === 'video' ? 'Camera and Microphone' : 'Microphone'
+  }, then start the call again.`;
 }
 
 function mediaErrorMessage(error: unknown, kind: CallKind): string {

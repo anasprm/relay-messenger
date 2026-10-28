@@ -164,6 +164,93 @@ html[data-ui="minimal"] .shadow-2xl {
   box-shadow: none;
 }
 
+/*
+ * Site identity — both domains serve the same build, but they read differently:
+ *   valiyakath.vercel.app        → WhatsApp-style workspace (green, wallpaper, tails)
+ *   relay-messengerpro.vercel.app → plain, formal workspace (neutral slate, flat, quiet)
+ */
+html[data-site='formal'] {
+  --app: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #f1f3f6;
+  --elevated: #ffffff;
+  --line: #e2e6eb;
+  --line-strong: #c8d0da;
+  --ink: #101828;
+  --muted: #5a6678;
+  --faint: #8a94a4;
+  --accent: #2f3a4c;
+  --accent-hover: #222b3a;
+  --accent-strong: #222b3a;
+  --accent-ink: #ffffff;
+  --accent-soft: #eef1f5;
+  --bubble: #ffffff;
+  --bubble-sent: #e8ecf2;
+  --bubble-sent-ink: #101828;
+  --wallpaper: #f7f8fa;
+  --danger: #b42318;
+  --success: #1c7a5a;
+}
+
+html[data-site='formal'].dark {
+  --app: #0b0f14;
+  --panel: #121821;
+  --panel-2: #18202b;
+  --elevated: #18202b;
+  --line: #1f2935;
+  --line-strong: #2c3846;
+  --ink: #e7ecf3;
+  --muted: #93a1b3;
+  --faint: #6b7889;
+  --accent: #3a4a61;
+  --accent-hover: #47597a;
+  --accent-strong: #3a4a61;
+  --accent-ink: #f2f6fb;
+  --accent-soft: #16202c;
+  --bubble: #18202b;
+  --bubble-sent: #223042;
+  --bubble-sent-ink: #eaf0f7;
+  --wallpaper: #0b0f14;
+  --danger: #f07a72;
+  --success: #4cc79a;
+}
+
+html[data-site='formal'] .chat-wallpaper,
+html[data-site='formal'] .vanish-canvas {
+  background-image: none;
+}
+
+html[data-site='formal'] .ui-decor,
+html[data-site='formal'] .brand-grid {
+  display: none;
+}
+
+html[data-site='formal'] .logo-mark {
+  background-image: none;
+  background-color: var(--accent);
+  box-shadow: none;
+}
+
+html[data-site='formal'] .bubble-out,
+html[data-site='formal'] .bubble-in,
+html[data-site='formal'] .bubble-out-group,
+html[data-site='formal'] .bubble-in-group {
+  border-radius: 0.5rem;
+}
+
+html[data-site='formal'] .bubble-tail-out::after,
+html[data-site='formal'] .bubble-tail-in::after {
+  display: none;
+}
+
+html[data-site='formal'] .bubble-shadow {
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+}
+
+html[data-site='formal'].dark .bubble-shadow {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 28%);
+}
+
 @layer base {
   * {
     border-color: var(--line);

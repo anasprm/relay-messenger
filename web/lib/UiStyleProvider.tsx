@@ -27,6 +27,12 @@ function applyUiStyle(style: UiStyle) {
   document.documentElement.dataset.ui = style;
 }
 
+/** The formal site opens flat and quiet; the WhatsApp-style site opens rounded. */
+function defaultStyleForSite(): UiStyle {
+  if (typeof document === 'undefined') return 'official';
+  return document.documentElement.dataset.site === 'formal' ? 'minimal' : 'official';
+}
+
 export function UiStyleProvider({ children }: { children: ReactNode }) {
   const [style, setStyleState] = useState<UiStyle>('official');
   const [mounted, setMounted] = useState(false);
@@ -39,7 +45,8 @@ export function UiStyleProvider({ children }: { children: ReactNode }) {
       stored = null;
     }
 
-    const initial: UiStyle = stored === 'minimal' ? 'minimal' : 'official';
+    const initial: UiStyle =
+      stored === 'minimal' || stored === 'official' ? stored : defaultStyleForSite();
     setStyleState(initial);
     applyUiStyle(initial);
     setMounted(true);

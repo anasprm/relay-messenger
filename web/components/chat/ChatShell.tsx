@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
 
 import { CallOverlay } from './CallOverlay';
+import { CallPermissionNotice } from './CallPermissionNotice';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
 import { ContactPanel } from './ContactPanel';
@@ -21,6 +22,7 @@ import { favoritesKey, pinnedKey, readIdSet, writeIdSet } from '@/lib/localSets'
 import { createSocket } from '@/lib/socket';
 import { useToast } from '@/lib/ToastProvider';
 import { useCall } from '@/lib/useCall';
+import { useMediaPermission } from '@/lib/useMediaPermission';
 import { cn } from '@/lib/utils';
 import type { Conversation, Message, Modes, SendMessagePayload } from '@/lib/types';
 
@@ -65,6 +67,13 @@ export function ChatShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [matchIndex, setMatchIndex] = useState(0);
+
+  const {
+    state: mediaPermission,
+    refresh: refreshMediaPermission,
+    checking: checkingMediaPermission,
+  } = useMediaPermission();
+  const [mediaNoticeDismissed, setMediaNoticeDismissed] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const activeIdRef = useRef<string | null>(null);
@@ -885,6 +894,16 @@ export function ChatShell() {
                   onRetry={retryMessages}
                   onReact={reactToMessage}
                 />
+                {mediaPermission === 'denied' && !mediaNoticeDismissed && (
+                  <CallPermissionNotice
+                    checking={checkingMediaPermission}
+                    onDismiss={() => setMediaNoticeDismissed(true)}
+                    onRecheck={() => {
+                      setMediaNoticeDismissed(false);
+                      void refreshMediaPermission();
+                    }}
+                  />
+                )}
                 <Composer
                   key={activeConversation.id}
                   conversationId={activeConversation.id}

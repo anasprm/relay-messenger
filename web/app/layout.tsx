@@ -29,12 +29,30 @@ export const viewport: Viewport = {
 const themeScript = `
 (function () {
   try {
-    var stored = localStorage.getItem('relay.theme');
-    var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var host = location.hostname;
+    var site =
+      host.indexOf('valiyakath') === 0
+        ? 'whatsapp'
+        : host.indexOf('relay-messengerpro') === 0
+          ? 'formal'
+          : 'whatsapp';
+    document.documentElement.dataset.site = site;
+
+    var storedTheme = localStorage.getItem('relay.theme');
+    var dark = storedTheme
+      ? storedTheme === 'dark'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
     if (dark) document.documentElement.classList.add('dark');
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-    var ui = localStorage.getItem('relay.ui');
-    document.documentElement.dataset.ui = ui === 'minimal' ? 'minimal' : 'official';
+
+    var storedUi = localStorage.getItem('relay.ui');
+    var ui =
+      storedUi === 'minimal' || storedUi === 'official'
+        ? storedUi
+        : site === 'formal'
+          ? 'minimal'
+          : 'official';
+    document.documentElement.dataset.ui = ui;
   } catch (error) {}
 })();
 `;
