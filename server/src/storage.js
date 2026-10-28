@@ -243,7 +243,7 @@ export function storageStatus() {
       provider: 'firestore',
       bucket: firebase.databaseId || 'default',
       durable: true,
-      error: supabaseError || firebase.storageError,
+      error: supabaseError || null,
     };
   }
 
