@@ -24,6 +24,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { UiStyleToggle } from '@/components/ui/UiStyleToggle';
+import { DeveloperCard } from '@/components/marketing/DeveloperCard';
 import { useAuth } from '@/lib/AuthProvider';
 
 const FEATURES = [
@@ -155,10 +156,7 @@ export function WelcomeScreen() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-faint">
-                <span>
-                  Demo workspace ·{' '}
-                  <span className="font-mono text-muted">demo / demo123</span>
-                </span>
+                <span>Accounts for this workspace</span>
                 <span className="hidden h-3 w-px bg-line sm:block" />
                 <span>No email required</span>
               </div>
@@ -449,9 +447,15 @@ export function WelcomeScreen() {
                 </Link>
               </div>
               <p className="mt-4 text-[10.5px] text-faint">
-                Demo credentials: <span className="font-mono text-muted">demo / demo123</span>
+                Accounts are created per site. Ask the owner for an invite if you need one.
               </p>
             </div>
+          </div>
+        </section>
+
+        <section className="border-t border-line bg-panel-2/40">
+          <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+            <DeveloperCard />
           </div>
         </section>
       </main>

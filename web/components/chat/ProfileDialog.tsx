@@ -15,6 +15,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
+import { DeveloperCard } from '@/components/marketing/DeveloperCard';
 import { Modal } from '@/components/ui/Modal';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { UiStyleToggle } from '@/components/ui/UiStyleToggle';
@@ -312,6 +313,10 @@ export function ProfileDialog({ open, user, onClose, onLogout, onSaved }: Profil
           <LogOut size={15} />
           Sign out
         </button>
+
+        <div className="mt-4">
+          <DeveloperCard variant="compact" />
+        </div>
       </div>
     </Modal>
   );
