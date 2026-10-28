@@ -447,7 +447,7 @@ export function WelcomeScreen() {
                 </Link>
               </div>
               <p className="mt-4 text-[10.5px] text-faint">
-                Accounts are created per site. Ask the owner for an invite if you need one.
+                No email required. Pick a username and password to start.
               </p>
             </div>
           </div>
