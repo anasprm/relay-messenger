@@ -8,14 +8,14 @@ export const DEVELOPER = {
   name: 'Muhammed Anas.v',
   role: 'Developer & maintainer',
   /** One or two short sentences about you. */
-  bio: '',
+  bio: 'Student at MIAC Arabic College. I build small, privacy-first tools like Relay in my spare time.',
   /** Optional: city / country shown next to the role. */
-  location: '',
+  location: 'Kerala, India',
   /** Optional contact links. Leave blank to hide. */
-  email: '',
+  email: 'anasprmatwork@gmail.com',
   website: '',
   github: '',
-  instagram: '',
+  instagram: 'https://instagram.com/mhd.anasyy',
   /** Optional short line under the links, e.g. "Built with Next.js and Socket.IO". */
   note: '',
 };
