@@ -12,7 +12,7 @@ export const DEVELOPER = {
   /** Optional: city / country shown next to the role. */
   location: 'Kerala, India',
   /** Optional contact links. Leave blank to hide. */
-  email: 'anaspmatwork@gmail.com',
+  email: 'anasprmatwork@gmail.com',
   website: '',
   github: '',
   instagram: 'https://instagram.com/mhd.anasyy',
