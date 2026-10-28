@@ -460,9 +460,12 @@ export function WelcomeScreen() {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-7 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="flex items-center gap-3">
             <Logo compact />
-            <p className="text-[10.5px] text-faint">
-              © 2026 Relay · Secure workspace messaging
-            </p>
+            <div>
+              <p className="text-[10.5px] text-faint">
+                © 2026 Relay · Secure workspace messaging
+              </p>
+              <p className="mt-0.5 text-[10px] text-faint">Developed by Muhammed Anas.v</p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-muted">
             <a href="#features" className="transition-colors hover:text-ink">

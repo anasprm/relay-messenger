@@ -374,6 +374,7 @@ export function Sidebar({
             {connected ? 'Live' : 'Reconnecting'}
           </span>
         </div>
+        <p className="mt-2 text-[9px] leading-tight text-faint">Developed by Muhammed Anas.v</p>
       </footer>
     </aside>
   );

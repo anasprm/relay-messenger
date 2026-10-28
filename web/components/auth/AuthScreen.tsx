@@ -202,6 +202,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
           <p className="relative mt-10 text-[11px] text-white/30">
             © 2026 Relay Systems · Session-based access · No external identity providers
           </p>
+          <p className="relative mt-1 text-[11px] text-white/25">Developed by Muhammed Anas.v</p>
         </aside>
 
         {/* Form */}

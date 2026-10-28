@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   description:
     'Relay is a focused realtime messaging workspace with direct threads, voice and video notes, secure calls, and privacy controls.',
   applicationName: 'Relay',
+  authors: [{ name: 'Muhammed Anas.v' }],
+  creator: 'Muhammed Anas.v',
 };
 
 export const viewport: Viewport = {
