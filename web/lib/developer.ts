@@ -8,7 +8,7 @@ export const DEVELOPER = {
   name: 'Muhammed Anas.v',
   role: 'Developer & maintainer',
   /** One or two short sentences about you. */
-  bio: 'Student at MIAC Arabic College. I build small, privacy-first tools like Relay in my spare time.',
+  bio: 'Student at MIAC Arabic College.',
   /** Optional: city / country shown next to the role. */
   location: 'Kerala, India',
   /** Optional contact links. Leave blank to hide. */
