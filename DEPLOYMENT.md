@@ -8,7 +8,7 @@ Relay is two services:
 | API + Socket.io (Express) | **Render** (free web service) | Auth, messages, uploads, presence, WebRTC signalling |
 | Data | **Firebase** (Spark plan) | Firestore database + rules |
 
-Firebase Storage is optional and only needs the Blaze plan when you want uploads to survive API restarts. The recommended no-card option is **Supabase Storage** (free tier). Without either, uploads are written to the API's local disk and disappear when a free Render service spins down.
+Uploads are durable out of the box: media is chunked into Firestore, which is already on the free Spark plan, so it survives API restarts. Firebase Storage (Blaze) and Supabase Storage are optional faster paths and are used first when configured.
 
 > **Never commit** `server/data/firebase-service-account.json` or any base64 version of it. It is gitignored — keep it that way.
 
@@ -61,24 +61,22 @@ base64 -w0 server/data/firebase-service-account.json
 
 **`CLIENT_ORIGIN`** — set it to the Vercel URL once step 2 is done. Until then use a placeholder such as `https://example.vercel.app`; the API starts fine either way.
 
-### 1b-2. Durable uploads (recommended, free)
+### 1b-2. Durable uploads (already handled)
 
-Render's free disk is ephemeral: every restart erases uploaded media. Supabase Storage fixes that without a credit card.
+Render's free disk is ephemeral, so uploads are not written there. Files are split into 500 KB chunks and stored in the same Firestore database the app already uses, then served by the API at `/media/<id>`. This needs no extra account, card, or bucket, and survives restarts and redeploys.
 
-1. Create a free project at [supabase.com](https://supabase.com).
-2. In **Storage**, create a **private** bucket named `relay-uploads`.
-3. Copy the project URL and the `service_role` key from **Project Settings → API**.
-4. Add these to the Render service:
+`/api/health` should report:
 
-   | Variable | Value |
-   |---|---|
-   | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
-   | `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` key (never expose this to the browser) |
-   | `SUPABASE_STORAGE_BUCKET` | `relay-uploads` |
+```json
+"storage": { "provider": "firestore", "durable": true }
+```
 
-Uploads are stored privately and served through long-lived signed URLs, so the bucket never needs to be public. Confirm `/api/health` reports `"storage": { "provider": "supabase", "durable": true }`.
+Two optional upgrades are supported and tried before Firestore:
 
-To move existing local files into the new bucket and repair generic MIME types (for example a video note saved as `text/plain`), run this once from the repository root with the same variables present in `server/.env`:
+- **Supabase Storage** — set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` (private bucket). A key that is rejected is detected at boot, logged, and skipped.
+- **Firebase Storage** — set `FIREBASE_STORAGE_BUCKET` once the project has a bucket (new buckets need the Blaze plan).
+
+To move existing local files into the configured provider and repair generic MIME types (for example a video note saved as `text/plain`), run this once from the repository root with the same variables present in `server/.env`:
 
 ```bash
 node server/scripts/migrate-uploads.mjs
@@ -194,25 +192,24 @@ If messages send but realtime does not update, the Socket.io origin is blocked. 
 | Behaviour | Effect |
 |---|---|
 | Cold start | Render free services sleep after ~15 minutes of inactivity; the first request can take 30–60 seconds. Socket.io reconnects automatically. |
-| Ephemeral disk | Local uploads and generated seed media are wiped on restart/redeploy. Seed media regenerates on every boot; **user uploads do not**. |
+| Ephemeral disk | Generated seed media is wiped on restart/redeploy and regenerated at boot. User uploads live in Firestore, so they are unaffected. |
 | Firestore quota | Spark plan quotas are plenty for a demo; data itself is durable. |
 | Sessions | Signed with `SESSION_SECRET`; if it changes, everyone is signed out. |
 
 ### Making uploads durable
 
-Preferred (free, no card): configure Supabase Storage as described in **1b-2**. Health then reports:
+This is the default: media is chunked into the Firestore database the app already uses, so no extra service is needed. Health reports:
 
 ```json
-"storage": { "provider": "supabase", "bucket": "relay-uploads", "durable": true }
+"storage": { "provider": "firestore", "bucket": "default", "durable": true }
 ```
 
-Alternative: enable the Blaze plan, create a Cloud Storage bucket, then add to Render:
+Optional upgrades, used first when configured:
 
-```
-FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app
-```
+- **Supabase Storage** — set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET`. Health reports `"provider": "supabase"`. An invalid key is logged at boot and skipped.
+- **Firebase Storage** — enable the Blaze plan, create a Cloud Storage bucket, then add `FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app` and restart. Health reports `"provider": "firebase"`.
 
-Restart the API and confirm `/api/health` reports `"provider": "firebase"`. No client changes are needed.
+No client changes are needed for any of them.
 
 ---
 

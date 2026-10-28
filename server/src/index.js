@@ -6,7 +6,7 @@ import { Server } from 'socket.io';
 import { CLIENT_ORIGINS, PORT, UPLOAD_DIR } from './config.js';
 import { dbStatus, getDb, initDb } from './db.js';
 import { firebaseStatus, probeStorage } from './firebase.js';
-import { storageStatus } from './storage.js';
+import { storageStatus, probeSupabaseStorage } from './storage.js';
 import { registerRealtime } from './realtime.js';
 import { ensureSeedAssets } from './seed.js';
 import { conversationScope, userScope } from './site.js';
@@ -15,6 +15,7 @@ import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes from './routes/uploads.js';
+import mediaRoutes from './routes/media.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -82,6 +83,8 @@ app.use('/uploads', (_req, res) => {
   res.status(404).json({ error: 'This attachment is no longer available on the server.' });
 });
 
+app.use('/media', mediaRoutes);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/conversations', conversationRoutes);
@@ -124,6 +127,7 @@ function shutdown(signal) {
 async function main() {
   await initDb();
   ensureSeedAssets();
+  await probeSupabaseStorage();
   await probeStorage();
 
   registerRealtime(io);
@@ -145,10 +149,12 @@ async function main() {
           ? `Supabase Storage (${storage.bucket})`
           : storage.provider === 'firebase'
             ? `Firebase Storage (${storage.bucket})`
-            : 'local disk (not durable)'
+            : storage.provider === 'firestore'
+              ? `Firestore media chunks (${storage.bucket}, durable)`
+              : 'local disk (not durable)'
       }`,
     );
-    console.log('  Demo login: demo / demo123\n');
+    console.log('\n');
   });
 }
 

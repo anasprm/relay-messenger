@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { UPLOAD_DIR } from './config.js';
 import { firebaseStatus, getStorageBucket } from './firebase.js';
+import {
+  deleteMedia,
+  isFirestoreMediaAvailable,
+  mediaIdFromUrl,
+  storeMedia,
+} from './media-store.js';
 
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.ps1', '.vbs',
@@ -11,6 +17,62 @@ const BLOCKED_EXTENSIONS = new Set([
 
 /** Ten years — long enough that a stored message does not lose its media. */
 const SUPABASE_SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 10;
+
+/**
+ * A rejected key will never start working mid-process, so stop retrying it and
+ * let uploads fall through to the next provider instead of paying a failed
+ * request on every upload.
+ */
+let supabaseRejected = false;
+let supabaseError = null;
+
+/**
+ * Verifies the Supabase key and bucket once at boot so the health endpoint and
+ * the startup log report where uploads really go.
+ */
+export async function probeSupabaseStorage() {
+  const config = supabaseConfig();
+  if (!config) return false;
+
+  try {
+    const res = await fetch(`${config.url}/storage/v1/bucket`, {
+      headers: { Authorization: `Bearer ${config.key}`, apikey: config.key },
+    });
+
+    if (res.status >= 400 && res.status < 500) {
+      const detail = await res.text().catch(() => '');
+      supabaseRejected = true;
+      supabaseError =
+        res.status === 401 || res.status === 403
+          ? `Supabase rejected the service role key (${res.status})`
+          : `Supabase bucket check failed (${res.status})${detail ? `: ${detail.slice(0, 120)}` : ''}`;
+      console.warn(`[storage] ${supabaseError}; uploads will use the durable Firestore store.`);
+      return false;
+    }
+
+    if (!res.ok) {
+      supabaseError = `Supabase bucket check failed (${res.status})`;
+      console.warn(`[storage] ${supabaseError}; uploads will use the durable Firestore store.`);
+      return false;
+    }
+
+    const buckets = await res.json().catch(() => null);
+    const names = Array.isArray(buckets) ? buckets.map((bucket) => bucket?.name) : null;
+    if (names && !names.includes(config.bucket)) {
+      supabaseRejected = true;
+      supabaseError = `Supabase bucket "${config.bucket}" does not exist`;
+      console.warn(`[storage] ${supabaseError}; uploads will use the durable Firestore store.`);
+      return false;
+    }
+
+    console.log(`[storage] Supabase Storage ready (${config.bucket})`);
+    return true;
+  } catch (error) {
+    supabaseError = `Supabase unreachable (${error.message})`;
+    console.warn(`[storage] ${supabaseError}; uploads will use the durable Firestore store.`);
+    return false;
+  }
+}
 
 export function extensionFor(filename = '') {
   return path.extname(filename).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 12);
@@ -21,6 +83,7 @@ export function isBlockedExtension(extension) {
 }
 
 function supabaseConfig() {
+  if (supabaseRejected) return null;
   const url = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
   const key = (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -63,6 +126,12 @@ async function storeSupabase(buffer, { filename, contentType, folder }) {
 
   if (!upload.ok) {
     const detail = await upload.text().catch(() => '');
+    if (upload.status === 401 || upload.status === 403) {
+      supabaseRejected = true;
+      console.warn(
+        '[storage] Supabase rejected the service role key; uploads will use the next provider until it is replaced.',
+      );
+    }
     throw new Error(
       `Supabase upload failed (${upload.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
     );
@@ -101,9 +170,9 @@ async function storeSupabase(buffer, { filename, contentType, folder }) {
 }
 
 /**
- * Persists an uploaded buffer in Supabase Storage, then Firebase Storage, and
- * finally local disk. The local fallback keeps development working but is
- * erased whenever a free Render service restarts.
+ * Persists an uploaded buffer in Supabase Storage, then Firebase Storage, then
+ * Firestore chunk storage, and finally local disk. Firestore is durable across
+ * Render restarts, so it is preferred over the local disk fallback.
  */
 export async function storeUpload(buffer, { extension = '', contentType = 'application/octet-stream', folder = 'uploads' } = {}) {
   const safeExtension = extension && !isBlockedExtension(extension) ? extension : '';
@@ -140,6 +209,14 @@ export async function storeUpload(buffer, { extension = '', contentType = 'appli
     }
   }
 
+  if (isFirestoreMediaAvailable()) {
+    try {
+      return await storeMedia(buffer, { contentType, folder });
+    } catch (error) {
+      console.warn(`[storage] Firestore media upload failed (${error.message}); using local disk.`);
+    }
+  }
+
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   fs.writeFileSync(path.join(UPLOAD_DIR, filename), buffer);
   return {
@@ -161,6 +238,15 @@ export function storageStatus() {
   }
 
   const firebase = firebaseStatus();
+  if (isFirestoreMediaAvailable()) {
+    return {
+      provider: 'firestore',
+      bucket: firebase.databaseId || 'default',
+      durable: true,
+      error: supabaseError || firebase.storageError,
+    };
+  }
+
   return {
     provider: firebase.storage,
     bucket: firebase.storageBucket,
@@ -178,6 +264,12 @@ export async function deleteUpload(url) {
   if (!url || typeof url !== 'string') return;
 
   try {
+    const mediaId = mediaIdFromUrl(url);
+    if (mediaId) {
+      await deleteMedia(mediaId);
+      return;
+    }
+
     if (url.startsWith('/uploads/')) {
       const file = path.join(UPLOAD_DIR, url.slice('/uploads/'.length));
       if (file.startsWith(UPLOAD_DIR) && fs.existsSync(file)) fs.unlinkSync(file);

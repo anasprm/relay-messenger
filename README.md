@@ -1,6 +1,6 @@
 # Relay
 
-Relay is a realtime direct-messaging workspace with a minimal, enterprise-focused interface. It ships as a small monorepo: a Next.js App Router frontend and an Express + Socket.io backend that persists to **Cloud Firestore**, with Firebase Storage for uploaded media and a local fallback when no bucket is configured.
+Relay is a realtime direct-messaging workspace with a minimal, enterprise-focused interface. It ships as a small monorepo: a Next.js App Router frontend and an Express + Socket.io backend that persists to **Cloud Firestore**, with uploaded media stored durably as Firestore chunks and served by the API.
 
 The public site opens on a marketing welcome page, then routes signed-in visitors straight to their threads. The interface ships in two styles — **Official** (the polished default) and **Minimal** (a flatter, quieter variant) — independent of the light/dark theme.
 
@@ -77,7 +77,7 @@ npm start
 - **Voice notes** recorded in-browser with `MediaRecorder` and a live waveform.
 - **Video notes** recorded from the camera with a preview and duration.
 - **File and image attachments** with upload progress, inline image previews, download links, size metadata, and a lightbox for images.
-- 30 MB upload limit. Files go to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is configured, and otherwise fall back to `server/uploads`.
+- 30 MB upload limit. Files are stored as Firestore media chunks by default (durable across Render restarts, no extra account), then Supabase Storage or Firebase Storage when configured, and finally `server/uploads` for local development.
 
 ### Privacy controls
 - **Anonymity mode** (per user, per thread): the sender's identity is replaced **server-side** before the message is sent to the other participant. The receiver sees `Anonymous Operator`, a null sender ID, and no profile link. The sender still sees their own message normally.
@@ -123,7 +123,7 @@ cp web/.env.example web/.env.local
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | unset | The service-account JSON encoded as base64; takes precedence and suits single-line secret fields |
 | `FIREBASE_PROJECT_ID` | from the service account | Firebase project ID |
 | `FIREBASE_FIRESTORE_DATABASE` | `default` | Firestore database ID (literal `default`, not `(default)`) |
-| `FIREBASE_STORAGE_BUCKET` | unset | Storage bucket name; uploads use local disk while unset |
+| `FIREBASE_STORAGE_BUCKET` | unset | Optional Firebase Storage bucket; when unset, media is stored as Firestore chunks (durable) |
 
 ### Web (`web/.env.local`)
 
@@ -161,9 +161,13 @@ Relay is connected to the Firebase project **`relay-messenger-anasprm`** (Firest
 3. Start the API and check `/api/health` — it reports `database.backend` and `firebase.storage`.
 4. Deploy security rules with `npx firebase-tools deploy --only firestore:rules`.
 
-### Storage caveat
+### Storage
 
-New Cloud Storage buckets require the **Blaze** billing plan. Until billing is enabled, leave `FIREBASE_STORAGE_BUCKET` unset: uploads are written to `server/uploads` and served by the API. The client upload and message flow is identical either way; once a bucket exists, set `FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app` and restart the API.
+Uploads do not need a Storage bucket. Files are split into 500 KB chunks and written to the `media` collection in Firestore, which the API already uses, so they survive Render restarts and redeploys on the free tier. The API serves them at `/media/<id>` with long-lived caching and HTTP range support.
+
+Cloud Storage buckets still need the **Blaze** billing plan. If you create one, set `FIREBASE_STORAGE_BUCKET=relay-messenger-anasprm.firebasestorage.app` and restart the API; Storage then takes over from Firestore. Supabase Storage is tried first whenever `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are valid.
+
+A rejected Supabase key is detected once at boot, logged, and skipped, so a bad key never slows uploads down.
 
 ---
 
@@ -184,11 +188,12 @@ New Cloud Storage buckets require the **Blaze** billing plan. Until billing is e
 │   │   ├── auth.js           # bcrypt hashing and HMAC session tokens
 │   │   ├── firebase.js       # Firebase Admin init, Firestore handle, Storage probe
 │   │   ├── db.js             # Firestore persistence + in-memory cache + JSON fallback
-│   │   ├── storage.js        # Firebase Storage upload with local-disk fallback
+│   │   ├── storage.js        # upload providers: Supabase, Firebase Storage, Firestore chunks, local disk
+│   │   ├── media-store.js    # durable Firestore chunk storage + media cache
 │   │   ├── seed.js           # demo users, conversations, messages, generated media
 │   │   ├── realtime.js       # presence, typing, messages, calls, purge broadcasts
 │   │   ├── serializers.js    # user-safe shapes, anonymous sender masking
-│   │   └── routes/           # auth, users, conversations, messages, uploads
+│   │   └── routes/           # auth, users, conversations, messages, uploads, media
 │   ├── data/                 # service account, db.json fallback, generated .secret
 │   └── uploads/              # fallback uploads and generated seed media
 └── web/
@@ -238,8 +243,9 @@ Both participants join per-user rooms; conversation access is checked before bro
 | `POST` | `/api/conversations/:id/purge` | Delete the current user's vanish messages in a thread |
 | `POST` | `/api/conversations/purge-ephemeral` | Delete all vanish messages owned by the caller |
 | `POST` | `/api/messages/:id/reactions` | Toggle a reaction |
-| `POST` | `/api/uploads` | Multipart upload (max 30 MB) |
-| `GET` | `/api/health` | Liveness and row counts |
+| `POST` | `/api/uploads` | Multipart upload (max 30 MB); returns a durable `/media/<id>` URL |
+| `GET` | `/media/:id` | Stream a stored attachment with range support |
+| `GET` | `/api/health` | Liveness, row counts, and the active storage provider |
 
 ---
 
