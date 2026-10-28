@@ -3,11 +3,20 @@ import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { getFirestoreDb, getFirebaseProjectId } from './firebase.js';
 import { seedDatabase } from './seed.js';
+import { conversationScope, userScope } from './site.js';
 
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 let state = null;
 let backend = 'json';
 let lastFirestoreError = null;
+
+/**
+ * Demo data is seeded only when the store is empty. Set SEED_DEMO=false to
+ * keep a wiped database empty instead of restoring the sample accounts.
+ */
+const SEED_DEMO = (process.env.SEED_DEMO || 'true').trim().toLowerCase() !== 'false';
+
+const emptyState = () => ({ version: 2, users: [], conversations: [], messages: [] });
 
 function validShape(candidate) {
   return (
@@ -31,7 +40,7 @@ function loadLocal() {
     if (!validShape(parsed)) throw new Error('Invalid database shape');
     state = parsed;
   } catch {
-    state = seedDatabase();
+    state = SEED_DEMO ? seedDatabase() : emptyState();
     writeLocalSnapshot();
   }
   backend = 'json';
@@ -82,7 +91,7 @@ async function loadFromFirestore() {
     messages: fromSnapshot(messages),
   };
 
-  if (parsed.users.length === 0) {
+  if (parsed.users.length === 0 && SEED_DEMO) {
     const seeded = seedDatabase();
     await writeAllToFirestore(seeded);
     state = seeded;
@@ -199,18 +208,21 @@ export function findUserById(id) {
   return getDb().users.find((user) => user.id === id) || null;
 }
 
-export function findUserByUsername(username) {
+export function findUserByUsername(username, scope) {
   const needle = String(username || '').trim().toLowerCase();
-  return getDb().users.find((user) => user.username === needle) || null;
+  const matches = getDb().users.filter((user) => user.username === needle);
+  if (!scope) return matches[0] || null;
+  return matches.find((user) => userScope(user) === scope) || null;
 }
 
 export function findConversation(id) {
   return getDb().conversations.find((conversation) => conversation.id === id) || null;
 }
 
-export function conversationFor(userId, conversationId) {
+export function conversationFor(userId, conversationId, scope) {
   const conversation = findConversation(conversationId);
   if (!conversation) return null;
+  if (scope && conversationScope(conversation) !== scope) return null;
   return conversation.participantIds.includes(userId) ? conversation : null;
 }
 
@@ -228,7 +240,21 @@ export function messagesFor(conversationId) {
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 }
 
-export function lastMessageFor(conversationId) {
-  const messages = messagesFor(conversationId);
+/** Messages the viewer has not cleared from their own copy of the thread. */
+export function visibleMessagesFor(conversation, viewerId) {
+  if (!conversation) return [];
+  const clearedAt = conversation.clearedAt?.[viewerId]
+    ? new Date(conversation.clearedAt[viewerId]).getTime()
+    : 0;
+  return messagesFor(conversation.id).filter(
+    (message) => new Date(message.createdAt).getTime() > clearedAt,
+  );
+}
+
+export function lastMessageFor(conversationId, viewerId, conversation) {
+  const messages =
+    viewerId && conversation
+      ? visibleMessagesFor(conversation, viewerId)
+      : messagesFor(conversationId);
   return messages.length ? messages[messages.length - 1] : null;
 }
