@@ -242,12 +242,18 @@ export function Composer({
     }
   }
 
+  function updateText(next: string) {
+    setText(next);
+    writeDraft(draftOwnerId, conversationId, next);
+    onDraftChange?.(conversationId, next);
+  }
+
   function insertEmoji(emoji: string) {
     const element = textareaRef.current;
     const start = element?.selectionStart ?? text.length;
     const end = element?.selectionEnd ?? start;
     const next = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
-    setText(next);
+    updateText(next);
     window.requestAnimationFrame(() => {
       const field = textareaRef.current;
       if (!field) return;
@@ -446,7 +452,7 @@ export function Composer({
               value={text}
               disabled={disabled}
               onChange={(event) => {
-                setText(event.target.value);
+                updateText(event.target.value);
                 setSendError(null);
               }}
               onKeyDown={handleKeyDown}
