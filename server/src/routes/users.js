@@ -33,7 +33,7 @@ router.get('/search', (req, res) => {
       return aExact - bExact || a.username.localeCompare(b.username);
     })
     .slice(0, 8)
-    .map((user) => publicUser(user));
+    .map((user) => publicUser(user, req.user));
 
   res.json({ users, scope: req.scope });
 });
@@ -78,6 +78,41 @@ router.patch('/me', async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/users/me/aliases/:userId — a private nickname for one contact.
+ * Only the caller's record changes; the other person keeps their own name.
+ */
+router.put('/me/aliases/:userId', async (req, res, next) => {
+  try {
+    const target = getDb().users.find((candidate) => candidate.id === req.params.userId);
+    if (!target || userScope(target) !== req.scope) {
+      return res.status(404).json({ error: 'No account found with that id.' });
+    }
+    if (target.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot rename your own account here.' });
+    }
+
+    const raw = String(req.body?.name ?? '').trim();
+    const aliases = { ...(req.user.aliases || {}) };
+
+    if (!raw) {
+      delete aliases[target.id];
+    } else {
+      const name = sanitizeText(raw, 40).trim();
+      if (!name) {
+        return res.status(400).json({ error: 'Enter a name or leave it empty to reset.' });
+      }
+      aliases[target.id] = name;
+    }
+
+    req.user.aliases = aliases;
+    await persistUser(req.user);
+    res.json({ user: publicUser(req.user), other: publicUser(target, req.user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /** GET /api/users/:username — exact lookup, used by "start a chat". */
 router.get('/:username', (req, res) => {
   const username = String(req.params.username || '').trim().toLowerCase();
@@ -89,7 +124,7 @@ router.get('/:username', (req, res) => {
     return res.status(404).json({ error: 'No account found with that username.' });
   }
 
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(user, req.user) });
 });
 
 export default router;

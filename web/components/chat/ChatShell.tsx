@@ -11,6 +11,7 @@ import { Composer } from './Composer';
 import { ContactPanel } from './ContactPanel';
 import { MessageList } from './MessageList';
 import { ChatLockDialog } from './ChatLockDialog';
+import { ContactAliasDialog } from './ContactAliasDialog';
 import { ChatLockGate } from './ChatLockGate';
 import { NewChatDialog } from './NewChatDialog';
 import { ProfileDialog } from './ProfileDialog';
@@ -87,6 +88,10 @@ export function ChatShell() {
   const [lockBusy, setLockBusy] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
 
+  const [aliasOpen, setAliasOpen] = useState(false);
+  const [aliasBusy, setAliasBusy] = useState(false);
+  const [aliasError, setAliasError] = useState<string | null>(null);
+
   const socketRef = useRef<Socket | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const activeConversationRef = useRef<Conversation | null>(null);
@@ -143,6 +148,7 @@ export function ChatShell() {
     setFilter('all');
     setUnlockedIds(new Set());
     setLockDialog(null);
+    setAliasOpen(false);
   }, [ownerId]);
 
   useEffect(() => {
@@ -720,6 +726,28 @@ export function ChatShell() {
     [lockDialog, toast],
   );
 
+  const saveAlias = useCallback(
+    async (name: string) => {
+      const conversation = activeConversationRef.current;
+      if (!conversation) return;
+
+      setAliasBusy(true);
+      setAliasError(null);
+      try {
+        await api.put(`/api/users/me/aliases/${conversation.other.id}`, { name });
+        await refreshConversations();
+        setMessageReloadKey((key) => key + 1);
+        setAliasOpen(false);
+        toast(name ? 'Contact renamed for you.' : 'Contact name reset.', 'success');
+      } catch (error) {
+        setAliasError(errorMessage(error));
+      } finally {
+        setAliasBusy(false);
+      }
+    },
+    [refreshConversations, toast],
+  );
+
   const updateModes = useCallback(
     async (patch: Partial<Modes>) => {
       const conversation = activeConversationRef.current;
@@ -1024,6 +1052,10 @@ export function ChatShell() {
                 onToggleFocus={() => setFocusMode((current) => !current)}
                 onBack={handleBack}
                 onClearChat={() => setConfirmAction({ type: 'clear' })}
+                onRenameContact={() => {
+                  setAliasError(null);
+                  setAliasOpen(true);
+                }}
                 locked={!!activeConversation.locked}
                 onLockChat={() => {
                   setLockError(null);
@@ -1153,6 +1185,21 @@ export function ChatShell() {
           setLockError(null);
         }}
         onSubmit={(pin) => void submitLockPin(pin)}
+      />
+
+      <ContactAliasDialog
+        open={aliasOpen}
+        otherName={activeConversation?.other.displayName || 'this contact'}
+        username={activeConversation?.other.username || ''}
+        currentName={activeConversation?.other.displayName || ''}
+        busy={aliasBusy}
+        error={aliasError}
+        onClose={() => {
+          if (aliasBusy) return;
+          setAliasOpen(false);
+          setAliasError(null);
+        }}
+        onSubmit={(name) => void saveAlias(name)}
       />
 
       <CallOverlay

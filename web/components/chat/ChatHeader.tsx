@@ -12,6 +12,7 @@ import {
   Maximize2,
   Minimize2,
   MoreVertical,
+  Pencil,
   Phone,
   Search,
   ShieldCheck,
@@ -46,6 +47,7 @@ interface ChatHeaderProps {
   onToggleFocus: () => void;
   onBack: () => void;
   onClearChat: () => void;
+  onRenameContact: () => void;
   locked: boolean;
   onLockChat: () => void;
   onRemoveLock: () => void;
@@ -72,6 +74,7 @@ export function ChatHeader({
   onToggleFocus,
   onBack,
   onClearChat,
+  onRenameContact,
   locked,
   onLockChat,
   onRemoveLock,
@@ -246,6 +249,18 @@ export function ChatHeader({
                 aria-label="Conversation actions"
                 className="absolute right-0 top-full z-50 mt-1.5 w-52 overflow-hidden rounded-xl border border-line bg-elevated p-1 shadow-[0_18px_50px_-18px_rgba(15,23,42,0.5)] animate-pop-in"
               >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRenameContact();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                >
+                  <Pencil size={14} className="text-muted" />
+                  Rename contact
+                </button>
                 <button
                   type="button"
                   role="menuitem"

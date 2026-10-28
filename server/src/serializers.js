@@ -11,12 +11,16 @@ const ANONYMOUS_IDENTITY = {
   anonymous: true,
 };
 
-export function publicUser(user) {
+export function publicUser(user, viewer = null) {
   if (!user) return null;
+  const alias =
+    viewer && viewer.id !== user.id && viewer.aliases
+      ? viewer.aliases[user.id] || null
+      : null;
   return {
     id: user.id,
     username: user.username,
-    displayName: user.displayName,
+    displayName: alias || user.displayName,
     accent: user.accent,
     avatarUrl: user.avatarUrl || null,
     discoverable: user.discoverable !== false,
@@ -29,6 +33,7 @@ export function serializeMessage(message, viewerId) {
   if (!message) return null;
 
   const sender = findUserById(message.senderId);
+  const viewer = findUserById(viewerId);
   const masked = !!message.anonymous && message.senderId !== viewerId;
   const viewedBy = message.viewedBy || {};
   const mine = message.senderId === viewerId;
@@ -37,7 +42,7 @@ export function serializeMessage(message, viewerId) {
     id: message.id,
     conversationId: message.conversationId,
     senderId: masked ? null : message.senderId,
-    sender: masked ? { ...ANONYMOUS_IDENTITY } : publicUser(sender),
+    sender: masked ? { ...ANONYMOUS_IDENTITY } : publicUser(sender, viewer),
     kind: message.kind || 'text',
     text: message.text || '',
     attachment: message.attachment || null,
@@ -60,6 +65,7 @@ export function unreadCount(conversation, viewerId) {
 }
 
 export function serializeConversation(conversation, viewerId) {
+  const viewer = findUserById(viewerId);
   const otherId = conversation.participantIds.find((participantId) => participantId !== viewerId);
   const locked = !!conversation.locks?.[viewerId];
   const last = locked ? null : lastMessageFor(conversation.id, viewerId, conversation);
@@ -67,9 +73,9 @@ export function serializeConversation(conversation, viewerId) {
   return {
     id: conversation.id,
     participants: conversation.participantIds.map((participantId) =>
-      publicUser(findUserById(participantId)),
+      publicUser(findUserById(participantId), viewer),
     ),
-    other: publicUser(findUserById(otherId)),
+    other: publicUser(findUserById(otherId), viewer),
     lastMessage: serializeMessage(last, viewerId),
     unreadCount: unreadCount(conversation, viewerId),
     modes: conversation.modes?.[viewerId] || { anonymity: false, vanish: false },

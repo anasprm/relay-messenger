@@ -144,7 +144,7 @@ export function registerRealtime(io) {
       }
 
       io.to(`user:${payload.to}`).emit('call:incoming', {
-        from: publicUser(user),
+        from: publicUser(user, findUserById(payload.to)),
         conversationId: conversation.id,
         kind: payload.kind === 'video' ? 'video' : 'audio',
         sdp: payload.sdp || null,
@@ -154,7 +154,7 @@ export function registerRealtime(io) {
     socket.on('call:accept', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
       io.to(`user:${payload.to}`).emit('call:accepted', {
-        from: publicUser(user),
+        from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
       });
     });
@@ -173,7 +173,7 @@ export function registerRealtime(io) {
     socket.on('call:decline', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
       io.to(`user:${payload.to}`).emit('call:declined', {
-        from: publicUser(user),
+        from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
         reason: payload.reason || 'declined',
       });
@@ -191,7 +191,7 @@ export function registerRealtime(io) {
     socket.on('call:end', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
       io.to(`user:${payload.to}`).emit('call:ended', {
-        from: publicUser(user),
+        from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
         reason: payload.reason || 'ended',
       });
