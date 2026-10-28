@@ -254,6 +254,7 @@ Both participants join per-user rooms; conversation access is checked before bro
 - Relay uses Firestore for persistence but keeps a single-process in-memory cache; it is not yet designed for multiple API instances without a shared pub/sub layer.
 - Session tokens are stored in `localStorage` and sent as bearer headers, so they are readable by any script that manages to run on the origin. Serve the site over HTTPS and keep third-party scripts off the page.
 - Sessions are stateless; signing out clears the client token but does not maintain a server-side revocation list.
+- Uploaded media lives in the Firestore `media` collection as base64 chunks (`media/{id}/chunks/{n}`), so it counts toward the Spark plan's 1 GiB storage. Deleting a message, unsending, or opening a view-once attachment removes those chunks.
 - WebRTC uses public STUN only. Add a TURN service for reliable calls across restrictive NATs or corporate networks.
 - Usernames are unique and matched case-insensitively. Anonymity masking happens on serialization, so raw sender IDs are not exposed to the other participant.
 - Vanish mode is cooperative: it removes data from Firestore and broadcasts the removal, but it cannot control screenshots or copies made by a recipient.
