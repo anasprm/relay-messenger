@@ -289,14 +289,14 @@ export function MessageBubble({
           onDoubleClick={() => onReact(message.id, '❤️')}
           title="Double-click to react"
           className={cn(
-            'relative max-w-full text-[14px] leading-[1.45] bubble-shadow',
+            'relative max-w-full text-[14px] leading-[1.45] bubble-shadow bubble-surface',
             message.attachment ? 'p-1.5' : 'px-2.5 py-1.5',
             mine ? 'bg-bubble-sent text-bubble-sent-ink' : 'bg-bubble text-ink',
             groupStart
               ? mine
-                ? 'rounded-[10px] rounded-tr-[2px] bubble-tail-out'
-                : 'rounded-[10px] rounded-tl-[2px] bubble-tail-in'
-              : 'rounded-[10px]',
+                ? 'bubble-start-out bubble-tail-out'
+                : 'bubble-start-in bubble-tail-in'
+              : '',
             activeMatch && 'ring-2 ring-accent/50 ring-offset-1 ring-offset-transparent',
           )}
         >

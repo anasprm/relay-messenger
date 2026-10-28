@@ -231,11 +231,29 @@ html[data-site='formal'] .logo-mark {
   box-shadow: none;
 }
 
-html[data-site='formal'] .bubble-out,
-html[data-site='formal'] .bubble-in,
-html[data-site='formal'] .bubble-out-group,
-html[data-site='formal'] .bubble-in-group {
-  border-radius: 0.5rem;
+html[data-site='formal'] .bubble-surface {
+  border-radius: 6px;
+}
+
+html[data-site='formal'] .bubble-surface.bubble-start-out {
+  border-top-right-radius: 6px;
+}
+
+html[data-site='formal'] .bubble-surface.bubble-start-in {
+  border-top-left-radius: 6px;
+}
+
+/* Base bubble shape. Lives outside @layer so it beats utility resets. */
+.bubble-surface {
+  border-radius: 10px;
+}
+
+.bubble-surface.bubble-start-out {
+  border-top-right-radius: 2px;
+}
+
+.bubble-surface.bubble-start-in {
+  border-top-left-radius: 2px;
 }
 
 html[data-site='formal'] .bubble-tail-out::after,
