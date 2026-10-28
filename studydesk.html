@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#2563eb" />
+<title>StudyDesk — A calmer way to study</title>
+<meta name="description" content="Short lessons, flashcards, and a focus timer organised by subject. A quiet learning platform for focused study sessions." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232563eb'/%3E%3Cstop offset='1' stop-color='%230ea5e9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M32 14 56 25 32 36 8 25Z' fill='%23fff'/%3E%3Cpath d='M18 30v9c0 4 6 7 14 7s14-3 14-7v-9l-6 3v7c0 2-3.6 3.5-8 3.5s-8-1.5-8-3.5v-7Z' fill='%23e0f2fe'/%3E%3Cpath d='M52 26v10' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3Ccircle cx='52' cy='39' r='2.6' fill='%23fff'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --ink: #0f172a;
+    --muted: #5b6678;
+    --line: #e2e8f0;
+    --blue: #2563eb;
+    --bg: #f6f8fc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; cursor: pointer; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(246, 248, 252, 0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { display: flex; align-items: center; gap: 12px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; text-align: left; }
+  .mark {
+    width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #fff;
+  }
+  .brand b { display: block; font-size: 15px; letter-spacing: -0.02em; }
+  .brand small { display: block; font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: #94a3b8; font-weight: 600; }
+  nav { margin-left: auto; display: none; gap: 24px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+  nav a:hover { color: var(--ink); }
+  .cta {
+    margin-left: auto; height: 36px; padding: 0 16px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #0f172a; color: #fff; font-size: 12px; font-weight: 600; border: 0;
+  }
+  @media (min-width: 760px) {
+    nav { display: flex; }
+    .cta { margin-left: 0; }
+  }
+  .hero { display: grid; gap: 40px; padding: 56px 0 64px; align-items: center; }
+  @media (min-width: 960px) { .hero { grid-template-columns: 1.1fr 0.9fr; padding: 80px 0 96px; } }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8;
+    border-radius: 999px; padding: 5px 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase;
+  }
+  h1 { margin: 18px 0 0; font-size: 40px; line-height: 1.06; letter-spacing: -0.035em; font-weight: 650; }
+  @media (min-width: 640px) { h1 { font-size: 52px; } }
+  .lede { margin: 18px 0 0; max-width: 520px; font-size: 14.5px; line-height: 1.65; color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .primary {
+    height: 44px; padding: 0 24px; border-radius: 999px; border: 0;
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--blue); color: #fff; font-size: 13px; font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+  .primary:hover { background: #1d4ed8; }
+  .secondary {
+    height: 44px; padding: 0 24px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; color: #334155; border: 1px solid var(--line);
+    font-size: 13px; font-weight: 600;
+  }
+  .secondary:hover { border-color: #cbd5e1; }
+  .checks { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 30px; font-size: 11.5px; color: var(--muted); }
+  .checks span { display: inline-flex; align-items: center; gap: 6px; }
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 22px;
+    box-shadow: 0 24px 70px -40px rgba(15, 23, 42, 0.45);
+  }
+  .card-top { display: flex; align-items: center; justify-content: space-between; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #64748b; }
+  .tag { background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 700; }
+  .clock { margin: 18px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 44px; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .hint { margin: 4px 0 0; font-size: 11.5px; color: #64748b; }
+  .timer-actions { display: flex; gap: 8px; margin-top: 18px; }
+  .timer-actions .primary, .timer-actions .secondary { height: 36px; padding: 0 16px; font-size: 12px; }
+  .plan { margin-top: 20px; padding-top: 16px; border-top: 1px solid #f1f5f9; display: grid; gap: 8px; }
+  .plan p { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569; }
+  section.band { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fff; padding: 64px 0; }
+  .section-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .kicker { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
+  h2 { margin: 8px 0 0; font-size: 26px; letter-spacing: -0.025em; font-weight: 650; }
+  .section-head p.side { max-width: 380px; margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--muted); }
+  .grid { display: grid; gap: 16px; margin-top: 32px; }
+  @media (min-width: 640px) { .grid.courses { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .grid.courses { grid-template-columns: repeat(4, 1fr); } .grid.tools { grid-template-columns: repeat(3, 1fr); } }
+  .course { display: flex; flex-direction: column; background: #fbfcfe; border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .course:hover { border-color: #cbd5e1; }
+  .icon { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: #fff; }
+  .course h3 { margin: 16px 0 0; font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; }
+  .course small { display: block; margin-top: 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #94a3b8; }
+  .course p { margin: 12px 0 0; flex: 1; font-size: 12px; line-height: 1.65; color: var(--muted); }
+  .course footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f1f5f9; font-size: 11px; font-weight: 500; color: #64748b; }
+  .tool { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+  .tool .icon { background: #eff6ff; color: var(--blue); }
+  .tool h3 { margin: 16px 0 0; font-size: 15px; font-weight: 650; }
+  .tool p { margin: 8px 0 0; font-size: 12.5px; line-height: 1.65; color: var(--muted); }
+  .steps { display: grid; gap: 32px; padding: 64px 0; }
+  @media (min-width: 960px) { .steps { grid-template-columns: 0.8fr 1.2fr; } }
+  .steps ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+  .steps li { display: flex; gap: 14px; background: #fbfcfe; border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .num { width: 30px; height: 30px; border-radius: 999px; background: #0f172a; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: 0 0 auto; }
+  .steps b { display: block; font-size: 13.5px; }
+  .steps span.copy { display: block; margin-top: 4px; font-size: 12px; line-height: 1.65; color: var(--muted); }
+  footer.site { border-top: 1px solid var(--line); }
+  .foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 30px 0; font-size: 11.5px; color: var(--muted); }
+  .foot .mini { width: 24px; height: 24px; border-radius: 8px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #fff; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap bar">
+    <button class="brand" id="brand" aria-label="StudyDesk home">
+      <span class="mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/><path d="M22 10v6"/></svg>
+      </span>
+      <span>
+        <b>StudyDesk</b>
+        <small>Learning platform</small>
+      </span>
+    </button>
+
+    <nav>
+      <a href="#courses">Courses</a>
+      <a href="#tools">Study tools</a>
+      <a href="#method">How it works</a>
+    </nav>
+
+    <a class="cta" href="#courses">
+      Browse courses
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <span class="pill">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/></svg>
+        A calmer way to study
+      </span>
+      <h1>Study smarter,<br />one focused session<br />at a time.</h1>
+      <p class="lede">Short lessons, flashcard review, and a quiet focus timer — organised by subject so you always know what to do next. No feeds, no noise.</p>
+
+      <div class="actions">
+        <a class="primary" href="#courses">
+          Explore the course library
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+        <a class="secondary" href="#tools">See study tools</a>
+      </div>
+
+      <div class="checks">
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Lesson notes included</span>
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Progress by subject</span>
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Works offline once installed</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <span class="eyebrow">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          Focus session
+        </span>
+        <span class="tag">Sample plan</span>
+      </div>
+
+      <p class="clock" id="clock">25:00</p>
+      <p class="hint" id="hint">Ready when you are.</p>
+
+      <div class="timer-actions">
+        <button class="primary" id="toggle">
+          <svg id="toggleIcon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <span id="toggleLabel">Start</span>
+        </button>
+        <button class="secondary" id="reset">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+          Reset
+        </button>
+      </div>
+
+      <div class="plan">
+        <p><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Review chapter 4 notes</p>
+        <p><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Practice 10 problems</p>
+        <p><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Summarise what you learned</p>
+      </div>
+    </div>
+  </div>
+
+  <section class="band" id="courses">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <p class="kicker">Course library</p>
+          <h2>Pick a subject and start small</h2>
+        </div>
+        <p class="side">Every course is a sequence of short lessons with notes, practice, and a review deck. Work through one at a time.</p>
+      </div>
+
+      <div class="grid courses">
+        <article class="course">
+          <span class="icon" style="background:linear-gradient(135deg,#3b82f6,#4f46e5)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+          </span>
+          <h3>Mathematics</h3>
+          <small>Foundations → Advanced</small>
+          <p>Algebra, calculus, and statistics broken into short lessons with worked examples.</p>
+          <footer>48 lessons · notes included</footer>
+        </article>
+
+        <article class="course">
+          <span class="icon" style="background:linear-gradient(135deg,#06b6d4,#2563eb)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+          </span>
+          <h3>Physics</h3>
+          <small>High school → University</small>
+          <p>Mechanics, waves, and electricity explained with visual problem sets.</p>
+          <footer>36 lessons · notes included</footer>
+        </article>
+
+        <article class="course">
+          <span class="icon" style="background:linear-gradient(135deg,#8b5cf6,#c026d3)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+          </span>
+          <h3>Literature</h3>
+          <small>Reading &amp; analysis</small>
+          <p>Close reading, essay structure, and guided notes for set texts.</p>
+          <footer>27 lessons · notes included</footer>
+        </article>
+
+        <article class="course">
+          <span class="icon" style="background:linear-gradient(135deg,#10b981,#0d9488)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6"/><path d="m16 6 6 6-6 6"/></svg>
+          </span>
+          <h3>Computer Science</h3>
+          <small>Beginner → Intermediate</small>
+          <p>Programming fundamentals, data structures, and small build projects.</p>
+          <footer>42 lessons · notes included</footer>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="tools" class="wrap" style="padding-top:64px;padding-bottom:64px">
+    <div class="grid tools">
+      <article class="tool">
+        <span class="icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
+        </span>
+        <h3>Flashcard decks</h3>
+        <p>Turn any lesson into spaced-repetition cards and review them in a few minutes a day.</p>
+      </article>
+
+      <article class="tool">
+        <span class="icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </span>
+        <h3>Focus sessions</h3>
+        <p>A quiet 25-minute timer with breaks, built to keep one subject in view at a time.</p>
+      </article>
+
+      <article class="tool">
+        <span class="icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </span>
+        <h3>Note library</h3>
+        <p>Keep lesson notes, summaries, and past papers together in one searchable place.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="band" id="method">
+    <div class="wrap steps">
+      <div>
+        <p class="kicker">How it works</p>
+        <h2>A simple loop that keeps you moving</h2>
+        <p class="side" style="margin-top:12px">StudyDesk is built around three habits: read a short lesson, practise it, then review it later. That is the whole system.</p>
+      </div>
+      <ol>
+        <li><span class="num">1</span><span><b>Read one lesson</b><span class="copy">Ten to fifteen minutes, with worked examples and a short summary at the end.</span></span></li>
+        <li><span class="num">2</span><span><b>Practise immediately</b><span class="copy">A small problem set for the same topic, so the idea is used before it fades.</span></span></li>
+        <li><span class="num">3</span><span><b>Review on a schedule</b><span class="copy">Flashcards bring the topic back at the right time instead of all at once.</span></span></li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap foot">
+    <span style="display:inline-flex;align-items:center;gap:8px">
+      <span class="mini" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>
+      </span>
+      StudyDesk — a quieter place to learn.
+    </span>
+    <span>Lesson notes · Flashcards · Focus sessions</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Change this if the chat lives on a different host.
+  var params = new URLSearchParams(location.search);
+  var TARGET =
+    params.get('site') === 'couple'
+      ? 'https://relay-messengerpro.vercel.app/chat'
+      : 'https://valiyakath.vercel.app/chat';
+
+  /* ---------- secret entry ---------- */
+  var taps = [];
+
+  function enter() {
+    location.href = TARGET;
+  }
+
+  // Seven quick taps on the logo.
+  document.getElementById('brand').addEventListener('click', function () {
+    var now = Date.now();
+    taps = taps.filter(function (time) { return now - time < 3000; });
+    taps.push(now);
+    if (taps.length >= 7) {
+      taps = [];
+      enter();
+    }
+  });
+
+  // Typing "relay" anywhere on the page.
+  var buffer = '';
+  window.addEventListener('keydown', function (event) {
+    var tag = (event.target && event.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.length !== 1) return;
+    buffer = (buffer + event.key.toLowerCase()).slice(-5);
+    if (buffer === 'relay') {
+      buffer = '';
+      enter();
+    }
+  });
+
+  // Ctrl/Cmd + Shift + L.
+  window.addEventListener('keydown', function (event) {
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      enter();
+    }
+  });
+
+  /* ---------- focus timer ---------- */
+  var remaining = 25 * 60;
+  var running = false;
+  var interval = null;
+  var clock = document.getElementById('clock');
+  var hint = document.getElementById('hint');
+  var toggle = document.getElementById('toggle');
+  var toggleLabel = document.getElementById('toggleLabel');
+  var toggleIcon = document.getElementById('toggleIcon');
+
+  function render() {
+    var minutes = Math.floor(remaining / 60);
+    var seconds = remaining % 60;
+    clock.textContent = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+    toggleLabel.textContent = running ? 'Pause' : 'Start';
+    toggleIcon.innerHTML = running
+      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+    hint.textContent = running
+      ? 'Stay with one subject until the timer ends.'
+      : remaining === 0
+        ? 'Session complete. Take a short break.'
+        : 'Ready when you are.';
+  }
+
+  function tick() {
+    remaining -= 1;
+    if (remaining <= 0) {
+      remaining = 0;
+      running = false;
+      window.clearInterval(interval);
+      interval = null;
+    }
+    render();
+  }
+
+  toggle.addEventListener('click', function () {
+    if (remaining === 0) remaining = 25 * 60;
+    running = !running;
+    if (running) {
+      interval = window.setInterval(tick, 1000);
+    } else if (interval) {
+      window.clearInterval(interval);
+      interval = null;
+    }
+    render();
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    if (interval) window.clearInterval(interval);
+    interval = null;
+    running = false;
+    remaining = 25 * 60;
+    render();
+  });
+
+  render();
+
+  /* ---------- installable manifest (inline, no extra files) ---------- */
+  var icon = location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '') + 'icon.svg';
+  var manifest = {
+    name: 'StudyDesk — A calmer way to study',
+    short_name: 'StudyDesk',
+    start_url: location.pathname,
+    display: 'standalone',
+    background_color: '#f6f8fc',
+    theme_color: '#2563eb',
+    icons: [{ src: icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }]
+  };
+  var link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
+  document.head.appendChild(link);
+})();
+</script>
+</body>
+</html>

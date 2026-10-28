@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  EyeOff,
   FileText,
   Ghost,
   Image as ImageIcon,
@@ -61,17 +62,20 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [viewOnce, setViewOnce] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  const viewOnceIntentRef = useRef(false);
 
   useEffect(() => {
     setText(readDraft(draftOwnerId, conversationId));
     setAttachment(null);
     setSendError(null);
+    setViewOnce(false);
   }, [conversationId, draftOwnerId]);
 
   useEffect(() => {
@@ -127,6 +131,9 @@ export function Composer({
 
   async function pickFile(file: File | undefined) {
     if (!file) return;
+    const wantsViewOnce = viewOnceIntentRef.current;
+    viewOnceIntentRef.current = false;
+
     if (file.size > MAX_BYTES) {
       toast('Files are limited to 30 MB.', 'error');
       return;
@@ -135,11 +142,15 @@ export function Composer({
     setUploading(true);
     setProgress(0);
     setAttachment(null);
+    setViewOnce(false);
     setSendError(null);
 
     try {
       const uploaded = await uploadAttachment(file, { filename: file.name }, setProgress);
       setAttachment(uploaded);
+      setViewOnce(
+        wantsViewOnce && (uploaded.kind === 'image' || uploaded.kind === 'video'),
+      );
     } catch (caught) {
       toast(errorMessage(caught), 'error');
     } finally {
@@ -164,6 +175,7 @@ export function Composer({
         if (options.clearComposer) {
           setText('');
           setAttachment(null);
+          setViewOnce(false);
           clearDraft(draftOwnerId, conversationId);
           onDraftChange?.(conversationId, '');
         }
@@ -230,6 +242,7 @@ export function Composer({
         text: trimmed,
         kind: attachment?.kind || 'text',
         attachment: attachment || undefined,
+        viewOnce: viewOnce && !!attachment ? true : undefined,
       },
       { clearComposer: true },
     );
@@ -384,6 +397,22 @@ export function Composer({
                     {formatBytes(attachment.size)}
                     {attachment.duration ? ` · ${formatDuration(attachment.duration)}` : ''}
                   </p>
+                  {(attachment.kind === 'image' || attachment.kind === 'video') && (
+                    <button
+                      type="button"
+                      onClick={() => setViewOnce((current) => !current)}
+                      aria-pressed={viewOnce}
+                      className={cn(
+                        'mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                        viewOnce
+                          ? 'border-accent/40 bg-accent-soft text-accent'
+                          : 'border-line text-muted hover:border-line-strong hover:text-ink',
+                      )}
+                    >
+                      <EyeOff size={10} />
+                      {viewOnce ? 'View once · on' : 'View once'}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -496,6 +525,7 @@ export function Composer({
                     role="menuitem"
                     onClick={() => {
                       setAttachOpen(false);
+                      viewOnceIntentRef.current = false;
                       imageInputRef.current?.click();
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
@@ -508,6 +538,20 @@ export function Composer({
                     role="menuitem"
                     onClick={() => {
                       setAttachOpen(false);
+                      viewOnceIntentRef.current = true;
+                      imageInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <EyeOff size={16} className="text-accent" />
+                    View-once photo
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachOpen(false);
+                      viewOnceIntentRef.current = false;
                       fileInputRef.current?.click();
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"

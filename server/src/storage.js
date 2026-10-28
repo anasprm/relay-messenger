@@ -168,3 +168,42 @@ export function storageStatus() {
     error: firebase.storageError,
   };
 }
+
+/**
+ * Best-effort removal of a stored file. Used when a view-once message is
+ * opened or an unsent message is revoked. Failures are logged, never thrown:
+ * the database record is the source of truth.
+ */
+export async function deleteUpload(url) {
+  if (!url || typeof url !== 'string') return;
+
+  try {
+    if (url.startsWith('/uploads/')) {
+      const file = path.join(UPLOAD_DIR, url.slice('/uploads/'.length));
+      if (file.startsWith(UPLOAD_DIR) && fs.existsSync(file)) fs.unlinkSync(file);
+      return;
+    }
+
+    const config = supabaseConfig();
+    if (config && url.includes('/storage/v1/object/sign/')) {
+      const marker = `/object/sign/${config.bucket}/`;
+      const index = url.indexOf(marker);
+      if (index >= 0) {
+        const objectPath = decodeURIComponent(url.slice(index + marker.length).split('?')[0]);
+        await fetch(`${config.url}/storage/v1/object/${config.bucket}/${encodeObjectPath(objectPath)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${config.key}` },
+        });
+      }
+      return;
+    }
+
+    const bucket = await getStorageBucket();
+    if (bucket && url.includes('firebasestorage.googleapis.com')) {
+      const match = url.match(/\/o\/([^?]+)/);
+      if (match) await bucket.file(decodeURIComponent(match[1])).delete({ ignoreNotFound: true });
+    }
+  } catch (error) {
+    console.warn(`[storage] Could not delete ${url}: ${error.message}`);
+  }
+}

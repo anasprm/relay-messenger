@@ -1,4 +1,4 @@
-import { findUserById, lastMessageFor, messagesFor } from './db.js';
+import { findUserById, lastMessageFor, visibleMessagesFor } from './db.js';
 import { isOnline } from './presence.js';
 
 const ANONYMOUS_IDENTITY = {
@@ -18,6 +18,8 @@ export function publicUser(user) {
     username: user.username,
     displayName: user.displayName,
     accent: user.accent,
+    avatarUrl: user.avatarUrl || null,
+    discoverable: user.discoverable !== false,
     online: isOnline(user.id),
     lastSeen: user.lastSeen || null,
   };
@@ -28,6 +30,8 @@ export function serializeMessage(message, viewerId) {
 
   const sender = findUserById(message.senderId);
   const masked = !!message.anonymous && message.senderId !== viewerId;
+  const viewedBy = message.viewedBy || {};
+  const mine = message.senderId === viewerId;
 
   return {
     id: message.id,
@@ -39,6 +43,9 @@ export function serializeMessage(message, viewerId) {
     attachment: message.attachment || null,
     anonymous: !!message.anonymous,
     ephemeral: !!message.ephemeral,
+    viewOnce: !!message.viewOnce,
+    // Sender sees whether it was opened; the recipient sees whether they opened it.
+    viewOnceOpened: mine ? Object.keys(viewedBy).length > 0 : !!viewedBy[viewerId],
     reactions: message.reactions || {},
     createdAt: message.createdAt,
   };
@@ -46,7 +53,7 @@ export function serializeMessage(message, viewerId) {
 
 export function unreadCount(conversation, viewerId) {
   const readAt = conversation.reads?.[viewerId] ? new Date(conversation.reads[viewerId]).getTime() : 0;
-  return messagesFor(conversation.id).filter(
+  return visibleMessagesFor(conversation, viewerId).filter(
     (message) =>
       message.senderId !== viewerId && new Date(message.createdAt).getTime() > readAt,
   ).length;
@@ -54,7 +61,8 @@ export function unreadCount(conversation, viewerId) {
 
 export function serializeConversation(conversation, viewerId) {
   const otherId = conversation.participantIds.find((participantId) => participantId !== viewerId);
-  const last = lastMessageFor(conversation.id);
+  const locked = !!conversation.locks?.[viewerId];
+  const last = locked ? null : lastMessageFor(conversation.id, viewerId, conversation);
 
   return {
     id: conversation.id,
@@ -65,6 +73,7 @@ export function serializeConversation(conversation, viewerId) {
     lastMessage: serializeMessage(last, viewerId),
     unreadCount: unreadCount(conversation, viewerId),
     modes: conversation.modes?.[viewerId] || { anonymity: false, vanish: false },
+    locked,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
   };

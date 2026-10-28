@@ -73,6 +73,12 @@ export const CLIENT_ORIGINS = Array.from(
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB
 
+/**
+ * Sign-up on the private family site is invite-only. An empty value closes
+ * private registration entirely, so a missing variable fails safe.
+ */
+export const PRIVATE_INVITE_CODE = (process.env.PRIVATE_INVITE_CODE || '').trim();
+
 function loadSecret() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
 

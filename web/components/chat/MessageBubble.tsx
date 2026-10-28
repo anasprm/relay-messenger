@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Check,
   Copy,
   Download,
+  EyeOff,
   FileText,
   Flame,
   MoreHorizontal,
   Shield,
   ShieldCheck,
+  Trash2,
   TriangleAlert,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
@@ -30,6 +33,8 @@ interface MessageBubbleProps {
   activeMatch?: boolean;
   onReact: (messageId: string, emoji: string) => void;
   onOpenImage: (attachment: Attachment) => void;
+  onViewOnce: (message: Message) => void;
+  onUnsend: (message: Message) => void;
 }
 
 function UnavailableAttachment({
@@ -66,6 +71,79 @@ function UnavailableAttachment({
         </span>
       </span>
     </div>
+  );
+}
+
+function ViewOnceCard({
+  message,
+  mine,
+  onOpen,
+}: {
+  message: Message;
+  mine: boolean;
+  onOpen: () => void;
+}) {
+  const opened = message.viewOnceOpened || !message.attachment;
+  const label = message.kind === 'video' ? 'Video' : 'Photo';
+  const interactive = !mine && !opened;
+
+  const body = (
+    <>
+      <span
+        className={cn(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+          mine ? 'bg-bubble-sent-ink/10 text-bubble-sent-ink' : 'bg-accent-soft text-accent',
+        )}
+      >
+        {opened ? <Check size={16} /> : <EyeOff size={16} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] font-medium">
+          {label} · view once
+        </span>
+        <span
+          className={cn(
+            'block text-[10px]',
+            mine ? 'text-bubble-sent-ink/60' : 'text-faint',
+          )}
+        >
+          {opened
+            ? mine
+              ? 'Opened by the recipient'
+              : 'Opened · no longer available'
+            : mine
+              ? 'Waiting to be opened'
+              : 'Tap to view · disappears once opened'}
+        </span>
+      </span>
+      {interactive && (
+        <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[10px] font-semibold text-accent-ink">
+          Open
+        </span>
+      )}
+    </>
+  );
+
+  const className = cn(
+    'flex min-w-[210px] items-center gap-3 rounded-lg border p-2.5 text-left transition-colors',
+    mine
+      ? 'border-bubble-sent-ink/15 bg-bubble-sent-ink/[0.06]'
+      : 'border-line bg-panel-2',
+    interactive && 'hover:border-accent/50 hover:bg-accent-soft/50',
+  );
+
+  if (!interactive) {
+    return (
+      <div className={className} role="status">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onOpen} className={className} aria-label={`Open view-once ${label.toLowerCase()}`}>
+      {body}
+    </button>
   );
 }
 
@@ -201,6 +279,8 @@ export function MessageBubble({
   activeMatch = false,
   onReact,
   onOpenImage,
+  onViewOnce,
+  onUnsend,
 }: MessageBubbleProps) {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -313,7 +393,15 @@ export function MessageBubble({
             </p>
           )}
 
-          {message.attachment && (
+          {message.viewOnce ? (
+            <div className={cn(message.text && 'mb-1.5')}>
+              <ViewOnceCard
+                message={message}
+                mine={mine}
+                onOpen={() => onViewOnce(message)}
+              />
+            </div>
+          ) : message.attachment ? (
             <div className={cn(message.text && 'mb-1.5')}>
               <AttachmentView
                 attachment={message.attachment}
@@ -322,7 +410,7 @@ export function MessageBubble({
                 onOpenImage={onOpenImage}
               />
             </div>
-          )}
+          ) : null}
 
           {message.text && (
             <p
@@ -431,6 +519,23 @@ export function MessageBubble({
                     >
                       <Copy size={13} className="text-muted" />
                       Copy text
+                    </button>
+                  </>
+                )}
+                {mine && (
+                  <>
+                    <div className="my-1 h-px bg-line" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onUnsend(message);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] font-medium text-danger transition-colors hover:bg-danger/10"
+                    >
+                      <Trash2 size={13} />
+                      Unsend for everyone
                     </button>
                   </>
                 )}

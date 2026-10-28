@@ -10,11 +10,14 @@ import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
 import { ContactPanel } from './ContactPanel';
 import { MessageList } from './MessageList';
+import { ChatLockDialog } from './ChatLockDialog';
+import { ChatLockGate } from './ChatLockGate';
 import { NewChatDialog } from './NewChatDialog';
 import { ProfileDialog } from './ProfileDialog';
 import { Sidebar, type ConversationFilter } from './Sidebar';
 import { WelcomePane } from './WelcomePane';
 import { Splash } from '@/components/ui/Splash';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { API_URL, api } from '@/lib/api';
 import { errorMessage, useAuth } from '@/lib/AuthProvider';
 import { readAllDrafts } from '@/lib/drafts';
@@ -24,7 +27,7 @@ import { useToast } from '@/lib/ToastProvider';
 import { useCall } from '@/lib/useCall';
 import { useMediaPermission } from '@/lib/useMediaPermission';
 import { cn } from '@/lib/utils';
-import type { Conversation, Message, Modes, SendMessagePayload } from '@/lib/types';
+import type { Conversation, Message, MessageKind, Modes, SendMessagePayload } from '@/lib/types';
 
 function activityTime(conversation: Conversation): number {
   return new Date(conversation.lastMessage?.createdAt || conversation.updatedAt).getTime();
@@ -36,7 +39,7 @@ function sortByActivity(conversations: Conversation[]): Conversation[] {
 
 export function ChatShell() {
   const router = useRouter();
-  const { user, token, loading, logout } = useAuth();
+  const { user, token, loading, logout, refresh } = useAuth();
   const { toast } = useToast();
   const ownerId = user?.id;
 
@@ -74,16 +77,29 @@ export function ChatShell() {
     checking: checkingMediaPermission,
   } = useMediaPermission();
   const [mediaNoticeDismissed, setMediaNoticeDismissed] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<
+    { type: 'unsend'; message: Message } | { type: 'clear' } | null
+  >(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(() => new Set());
+  const [lockDialog, setLockDialog] = useState<'set' | 'remove' | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockError, setLockError] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const activeConversationRef = useRef<Conversation | null>(null);
+  const activeLockedRef = useRef(false);
   const previousActiveRef = useRef<string | null>(null);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeId) || null,
     [activeId, conversations],
   );
+
+  const activeLocked =
+    !!activeConversation?.locked && !unlockedIds.has(activeConversation.id);
 
   const matches = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
@@ -107,6 +123,10 @@ export function ChatShell() {
   }, [activeConversation]);
 
   useEffect(() => {
+    activeLockedRef.current = activeLocked;
+  }, [activeLocked]);
+
+  useEffect(() => {
     if (!loading && !user) router.replace('/login');
   }, [loading, router, user]);
 
@@ -121,6 +141,8 @@ export function ChatShell() {
     setSearchQuery('');
     setMatchIndex(0);
     setFilter('all');
+    setUnlockedIds(new Set());
+    setLockDialog(null);
   }, [ownerId]);
 
   useEffect(() => {
@@ -280,7 +302,7 @@ export function ChatShell() {
       if (!message?.id || !message.conversationId) return;
 
       const isActive = activeIdRef.current === message.conversationId;
-      if (isActive) {
+      if (isActive && !activeLockedRef.current) {
         setMessages((previous) =>
           previous.some((candidate) => candidate.id === message.id)
             ? previous
@@ -307,15 +329,19 @@ export function ChatShell() {
 
         const next = previous.map((conversation) => {
           if (conversation.id !== message.conversationId) return conversation;
+          const unreadCount = isActive
+            ? 0
+            : message.senderId !== user.id
+              ? conversation.unreadCount + 1
+              : conversation.unreadCount;
+          if (conversation.locked) {
+            return { ...conversation, updatedAt: message.createdAt, unreadCount };
+          }
           return {
             ...conversation,
             lastMessage: message,
             updatedAt: message.createdAt,
-            unreadCount: isActive
-              ? 0
-              : message.senderId !== user.id
-                ? conversation.unreadCount + 1
-                : conversation.unreadCount,
+            unreadCount,
           };
         });
 
@@ -329,11 +355,16 @@ export function ChatShell() {
       );
       setConversations((previous) =>
         previous.map((conversation) =>
-          conversation.lastMessage?.id === message.id
+          !conversation.locked && conversation.lastMessage?.id === message.id
             ? { ...conversation, lastMessage: message }
             : conversation,
         ),
       );
+    };
+
+    const onMessageDeleted = ({ id }: { id: string }) => {
+      setMessages((previous) => previous.filter((message) => message.id !== id));
+      void refreshConversations();
     };
 
     const onPurged = ({ conversationId, ids }: { conversationId: string; ids: string[] }) => {
@@ -383,6 +414,7 @@ export function ChatShell() {
     client.on('presence:update', onPresenceUpdate);
     client.on('message:new', onMessage);
     client.on('message:update', onMessageUpdate);
+    client.on('message:deleted', onMessageDeleted);
     client.on('messages:purged', onPurged);
     client.on('conversation:modes', onModes);
     client.on('typing:update', onTyping);
@@ -396,6 +428,7 @@ export function ChatShell() {
       client.off('presence:update', onPresenceUpdate);
       client.off('message:new', onMessage);
       client.off('message:update', onMessageUpdate);
+      client.off('message:deleted', onMessageDeleted);
       client.off('messages:purged', onPurged);
       client.off('conversation:modes', onModes);
       client.off('typing:update', onTyping);
@@ -412,6 +445,14 @@ export function ChatShell() {
     activeIdRef.current = activeId;
 
     if (!activeId) {
+      setMessages([]);
+      setMessageError(null);
+      setLoadingMessages(false);
+      return;
+    }
+
+    // A locked thread is not fetched until the PIN unlocks it in this session.
+    if (activeLocked) {
       setMessages([]);
       setMessageError(null);
       setLoadingMessages(false);
@@ -458,7 +499,7 @@ export function ChatShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, messageReloadKey]);
+  }, [activeId, activeLocked, messageReloadKey]);
 
   /* Closing a thread destroys its vanish-mode messages on both sides. */
   useEffect(() => {
@@ -568,6 +609,115 @@ export function ChatShell() {
       }
     },
     [toast],
+  );
+
+  const viewOnceMessage = useCallback(
+    async (message: Message) => {
+      try {
+        const response = await api.post<{
+          url: string;
+          name: string;
+          mime: string;
+          kind: MessageKind;
+        }>(`/api/messages/${message.id}/view`);
+        setMessages((previous) =>
+          previous.map((candidate) =>
+            candidate.id === message.id
+              ? { ...candidate, attachment: null, viewOnceOpened: true }
+              : candidate,
+          ),
+        );
+        return response;
+      } catch (error) {
+        toast(errorMessage(error), 'error');
+        return null;
+      }
+    },
+    [toast],
+  );
+
+  const confirmActionNow = useCallback(async () => {
+    if (!confirmAction || confirmBusy) return;
+    setConfirmBusy(true);
+    try {
+      if (confirmAction.type === 'unsend') {
+        await api.delete(`/api/messages/${confirmAction.message.id}`);
+        setMessages((previous) =>
+          previous.filter((message) => message.id !== confirmAction.message.id),
+        );
+        toast('Message unsent for everyone.', 'success');
+        void refreshConversations();
+      } else {
+        const conversation = activeConversationRef.current;
+        if (conversation) {
+          await api.post(`/api/conversations/${conversation.id}/clear`);
+          setMessages([]);
+          toast('Chat cleared from your copy.', 'success');
+          void refreshConversations();
+        }
+      }
+      setConfirmAction(null);
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    } finally {
+      setConfirmBusy(false);
+    }
+  }, [confirmAction, confirmBusy, refreshConversations, toast]);
+
+  const unlockConversation = useCallback(async (pin: string): Promise<string | null> => {
+    const conversation = activeConversationRef.current;
+    if (!conversation) return 'No conversation selected.';
+    try {
+      await api.post(`/api/conversations/${conversation.id}/unlock`, { pin });
+      setUnlockedIds((previous) => new Set(previous).add(conversation.id));
+      return null;
+    } catch (error) {
+      return errorMessage(error);
+    }
+  }, []);
+
+  const submitLockPin = useCallback(
+    async (pin: string) => {
+      const conversation = activeConversationRef.current;
+      if (!conversation || !lockDialog) return;
+
+      setLockBusy(true);
+      setLockError(null);
+      try {
+        if (lockDialog === 'set') {
+          await api.put(`/api/conversations/${conversation.id}/lock`, { pin });
+          setConversations((previous) =>
+            previous.map((candidate) =>
+              candidate.id === conversation.id
+                ? { ...candidate, locked: true, lastMessage: null }
+                : candidate,
+            ),
+          );
+          setUnlockedIds((previous) => {
+            const next = new Set(previous);
+            next.delete(conversation.id);
+            return next;
+          });
+          toast('Chat locked. Your PIN is required to open it.', 'success');
+        } else {
+          await api.delete(`/api/conversations/${conversation.id}/lock`, { pin });
+          setConversations((previous) =>
+            previous.map((candidate) =>
+              candidate.id === conversation.id ? { ...candidate, locked: false } : candidate,
+            ),
+          );
+          setUnlockedIds((previous) => new Set(previous).add(conversation.id));
+          setMessageReloadKey((current) => current + 1);
+          toast('Chat lock removed.', 'success');
+        }
+        setLockDialog(null);
+      } catch (error) {
+        setLockError(errorMessage(error));
+      } finally {
+        setLockBusy(false);
+      }
+    },
+    [lockDialog, toast],
   );
 
   const updateModes = useCallback(
@@ -873,48 +1023,68 @@ export function ChatShell() {
                 onOpenInfo={() => setInfoOpen((current) => !current)}
                 onToggleFocus={() => setFocusMode((current) => !current)}
                 onBack={handleBack}
+                onClearChat={() => setConfirmAction({ type: 'clear' })}
+                locked={!!activeConversation.locked}
+                onLockChat={() => {
+                  setLockError(null);
+                  setLockDialog('set');
+                }}
+                onRemoveLock={() => {
+                  setLockError(null);
+                  setLockDialog('remove');
+                }}
               />
 
-              <div
-                className={cn(
-                  'flex min-h-0 flex-1 flex-col transition-colors duration-500',
-                  activeConversation.modes.vanish && 'vanish-canvas',
-                )}
-              >
-                <MessageList
-                  conversationId={activeConversation.id}
-                  messages={messages}
-                  me={user}
+              {activeLocked ? (
+                <ChatLockGate
                   other={activeConversation.other}
-                  loading={loadingMessages}
-                  typing={activeTyping}
-                  error={messageError}
-                  searchQuery={searchQuery}
-                  activeMatchId={activeMatch?.id || null}
-                  onRetry={retryMessages}
-                  onReact={reactToMessage}
+                  online={peerOnline}
+                  onUnlock={unlockConversation}
                 />
-                {mediaPermission === 'denied' && !mediaNoticeDismissed && (
-                  <CallPermissionNotice
-                    checking={checkingMediaPermission}
-                    onDismiss={() => setMediaNoticeDismissed(true)}
-                    onRecheck={() => {
-                      setMediaNoticeDismissed(false);
-                      void refreshMediaPermission();
-                    }}
+              ) : (
+                <div
+                  className={cn(
+                    'flex min-h-0 flex-1 flex-col transition-colors duration-500',
+                    activeConversation.modes.vanish && 'vanish-canvas',
+                  )}
+                >
+                  <MessageList
+                    conversationId={activeConversation.id}
+                    messages={messages}
+                    me={user}
+                    other={activeConversation.other}
+                    loading={loadingMessages}
+                    typing={activeTyping}
+                    error={messageError}
+                    searchQuery={searchQuery}
+                    activeMatchId={activeMatch?.id || null}
+                    onRetry={retryMessages}
+                    onReact={reactToMessage}
+                    onViewOnce={viewOnceMessage}
+                    onUnsend={(message) => setConfirmAction({ type: 'unsend', message })}
                   />
-                )}
-                <Composer
-                  key={activeConversation.id}
-                  conversationId={activeConversation.id}
-                  draftOwnerId={user.id}
-                  vanish={activeConversation.modes.vanish}
-                  anonymity={activeConversation.modes.anonymity}
-                  onSend={sendMessage}
-                  onTypingChange={handleTypingChange}
-                  onDraftChange={handleDraftChange}
-                />
-              </div>
+                  {mediaPermission === 'denied' && !mediaNoticeDismissed && (
+                    <CallPermissionNotice
+                      checking={checkingMediaPermission}
+                      onDismiss={() => setMediaNoticeDismissed(true)}
+                      onRecheck={() => {
+                        setMediaNoticeDismissed(false);
+                        void refreshMediaPermission();
+                      }}
+                    />
+                  )}
+                  <Composer
+                    key={activeConversation.id}
+                    conversationId={activeConversation.id}
+                    draftOwnerId={user.id}
+                    vanish={activeConversation.modes.vanish}
+                    anonymity={activeConversation.modes.anonymity}
+                    onSend={sendMessage}
+                    onTypingChange={handleTypingChange}
+                    onDraftChange={handleDraftChange}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <WelcomePane onNewChat={() => openNewChat()} />
@@ -968,6 +1138,21 @@ export function ChatShell() {
         user={user}
         onClose={() => setProfileOpen(false)}
         onLogout={handleLogout}
+        onSaved={refresh}
+      />
+
+      <ChatLockDialog
+        open={!!lockDialog}
+        mode={lockDialog || 'set'}
+        otherName={activeConversation?.other.displayName || 'this contact'}
+        busy={lockBusy}
+        error={lockError}
+        onClose={() => {
+          if (lockBusy) return;
+          setLockDialog(null);
+          setLockError(null);
+        }}
+        onSubmit={(pin) => void submitLockPin(pin)}
       />
 
       <CallOverlay
@@ -979,6 +1164,24 @@ export function ChatShell() {
         onEnd={end}
         onToggleMute={toggleMute}
         onToggleCamera={toggleCamera}
+      />
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        title={confirmAction?.type === 'clear' ? 'Clear this chat?' : 'Unsend this message?'}
+        description={
+          confirmAction?.type === 'clear'
+            ? 'This removes the history from your copy only. The other person keeps their messages, and new messages still arrive.'
+            : 'This removes the message for both of you, including any attachment. This cannot be undone.'
+        }
+        confirmLabel={confirmAction?.type === 'clear' ? 'Clear chat' : 'Unsend'}
+        destructive
+        busy={confirmBusy}
+        onCancel={() => {
+          if (confirmBusy) return;
+          setConfirmAction(null);
+        }}
+        onConfirm={() => void confirmActionNow()}
       />
     </div>
   );

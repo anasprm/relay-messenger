@@ -1,18 +1,18 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
+import { hashPassword, requireAuth, verifyPassword } from '../auth.js';
 import {
   conversationFor,
   deleteMessagesByIds,
-  findConversation,
   findUserByUsername,
   getDb,
   lastMessageFor,
-  messagesFor,
   persistConversation,
   persistMessage,
+  visibleMessagesFor,
 } from '../db.js';
 import { serializeConversation, serializeMessage } from '../serializers.js';
+import { conversationScope } from '../site.js';
 import {
   broadcastConversationRefresh,
   broadcastMessage,
@@ -42,7 +42,11 @@ function sortConversations(conversations) {
 /** GET /api/conversations — sidebar data for the signed-in user. */
 router.get('/', (req, res) => {
   const conversations = getDb()
-    .conversations.filter((conversation) => conversation.participantIds.includes(req.user.id))
+    .conversations.filter(
+      (conversation) =>
+        conversation.participantIds.includes(req.user.id) &&
+        conversationScope(conversation) === req.scope,
+    )
     .map((conversation) => serializeConversation(conversation, req.user.id));
 
   res.json({ conversations: sortConversations(conversations) });
@@ -58,7 +62,11 @@ router.post('/purge-ephemeral', async (req, res, next) => {
     const io = req.app.locals.io;
     const conversationIds = new Set(
       db.conversations
-        .filter((conversation) => conversation.participantIds.includes(req.user.id))
+        .filter(
+          (conversation) =>
+            conversation.participantIds.includes(req.user.id) &&
+            conversationScope(conversation) === req.scope,
+        )
         .map((conversation) => conversation.id),
     );
 
@@ -90,7 +98,7 @@ router.post('/purge-ephemeral', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const username = String(req.body?.username || '').trim().toLowerCase();
-    const other = findUserByUsername(username);
+    const other = findUserByUsername(username, req.scope);
 
     if (!other) return res.status(404).json({ error: 'No account found with that username.' });
     if (other.id === req.user.id) {
@@ -102,13 +110,15 @@ router.post('/', async (req, res, next) => {
       (candidate) =>
         candidate.participantIds.length === 2 &&
         candidate.participantIds.includes(req.user.id) &&
-        candidate.participantIds.includes(other.id),
+        candidate.participantIds.includes(other.id) &&
+        conversationScope(candidate) === req.scope,
     );
 
     if (!conversation) {
       conversation = {
         id: crypto.randomUUID(),
         participantIds: [req.user.id, other.id],
+        scope: req.scope,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         modes: {
@@ -130,11 +140,11 @@ router.post('/', async (req, res, next) => {
 
 /** GET /api/conversations/:id/messages */
 router.get('/:id/messages', (req, res) => {
-  const conversation = conversationFor(req.user.id, req.params.id);
+  const conversation = conversationFor(req.user.id, req.params.id, req.scope);
   if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
 
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-  const messages = messagesFor(conversation.id).slice(-limit);
+  const messages = visibleMessagesFor(conversation, req.user.id).slice(-limit);
 
   res.json({
     messages: messages.map((message) => serializeMessage(message, req.user.id)),
@@ -145,7 +155,7 @@ router.get('/:id/messages', (req, res) => {
 /** POST /api/conversations/:id/messages */
 router.post('/:id/messages', async (req, res, next) => {
   try {
-    const conversation = conversationFor(req.user.id, req.params.id);
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
 
     const text = sanitizeText(req.body?.text);
@@ -182,6 +192,11 @@ router.post('/:id/messages', async (req, res, next) => {
 
     const modes = conversation.modes?.[req.user.id] || { anonymity: false, vanish: false };
 
+    const viewOnce =
+      !!req.body?.viewOnce &&
+      !!attachment &&
+      (attachment.kind === 'image' || attachment.kind === 'video');
+
     const message = {
       id: crypto.randomUUID(),
       conversationId: conversation.id,
@@ -191,6 +206,7 @@ router.post('/:id/messages', async (req, res, next) => {
       attachment,
       anonymous: !!modes.anonymity,
       ephemeral: !!modes.vanish,
+      ...(viewOnce ? { viewOnce: true, viewedBy: {}, openedAt: null } : {}),
       reactions: {},
       createdAt: new Date().toISOString(),
     };
@@ -212,7 +228,7 @@ router.post('/:id/messages', async (req, res, next) => {
 /** POST /api/conversations/:id/read */
 router.post('/:id/read', async (req, res, next) => {
   try {
-    const conversation = conversationFor(req.user.id, req.params.id);
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
 
     conversation.reads = conversation.reads || {};
@@ -228,7 +244,7 @@ router.post('/:id/read', async (req, res, next) => {
 /** PATCH /api/conversations/:id/modes { anonymity?, vanish? } */
 router.patch('/:id/modes', async (req, res, next) => {
   try {
-    const conversation = conversationFor(req.user.id, req.params.id);
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
 
     conversation.modes = conversation.modes || {};
@@ -253,7 +269,7 @@ router.patch('/:id/modes', async (req, res, next) => {
  */
 router.post('/:id/purge', async (req, res, next) => {
   try {
-    const conversation = conversationFor(req.user.id, req.params.id);
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
 
     const db = getDb();
@@ -274,14 +290,110 @@ router.post('/:id/purge', async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/conversations/:id/clear
+ * Clears the thread from the caller's copy only. The other participant keeps
+ * their messages, exactly like clearing a chat on a phone.
+ */
+router.post('/:id/clear', async (req, res, next) => {
+  try {
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+
+    conversation.clearedAt = conversation.clearedAt || {};
+    conversation.clearedAt[req.user.id] = new Date().toISOString();
+    await persistConversation(conversation);
+
+    res.json({ ok: true, clearedAt: conversation.clearedAt[req.user.id] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Chat lock is optional and private to each participant: one side can lock a
+ * thread without changing what the other side sees. The PIN is stored as a
+ * bcrypt hash on the conversation record.
+ */
+function pinError(pin) {
+  if (!/^\d{4,8}$/.test(pin)) return 'PIN must be 4–8 digits.';
+  return null;
+}
+
+/** PUT /api/conversations/:id/lock { pin } — lock (or re-key) this thread. */
+router.put('/:id/lock', async (req, res, next) => {
+  try {
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+
+    const pin = String(req.body?.pin || '');
+    const invalid = pinError(pin);
+    if (invalid) return res.status(400).json({ error: invalid });
+
+    conversation.locks = conversation.locks || {};
+    conversation.locks[req.user.id] = {
+      pinHash: hashPassword(pin),
+      createdAt: new Date().toISOString(),
+    };
+    await persistConversation(conversation);
+
+    res.json({ locked: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/conversations/:id/unlock { pin } — verify the PIN for this session. */
+router.post('/:id/unlock', async (req, res, next) => {
+  try {
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+
+    const lock = conversation.locks?.[req.user.id];
+    if (!lock) return res.json({ ok: true, locked: false });
+
+    const pin = String(req.body?.pin || '');
+    if (!verifyPassword(pin, lock.pinHash)) {
+      return res.status(403).json({ error: 'Incorrect PIN.' });
+    }
+
+    res.json({ ok: true, locked: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** DELETE /api/conversations/:id/lock { pin } — remove the lock entirely. */
+router.delete('/:id/lock', async (req, res, next) => {
+  try {
+    const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+
+    const lock = conversation.locks?.[req.user.id];
+    if (!lock) return res.json({ locked: false });
+
+    const pin = String(req.body?.pin || '');
+    if (!verifyPassword(pin, lock.pinHash)) {
+      return res.status(403).json({ error: 'Incorrect PIN.' });
+    }
+
+    delete conversation.locks[req.user.id];
+    await persistConversation(conversation);
+
+    res.json({ locked: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /** GET /api/conversations/:id — single thread refresh. */
 router.get('/:id', (req, res) => {
-  const conversation = findConversation(req.params.id);
-  if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+  const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+  if (!conversation) {
     return res.status(404).json({ error: 'Conversation not found.' });
   }
 
-  const lastMessage = lastMessageFor(conversation.id);
+  const lastMessage = lastMessageFor(conversation.id, req.user.id, conversation);
 
   res.json({
     conversation: serializeConversation(conversation, req.user.id),

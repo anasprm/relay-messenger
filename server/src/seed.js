@@ -177,6 +177,7 @@ export function seedDatabase() {
     displayName,
     accent,
     passwordHash: hashPassword(password),
+    scope: 'public',
     createdAt: ago(60 * 24 * 90),
     lastSeen: ago(lastSeenMinutes),
   });
@@ -198,6 +199,7 @@ export function seedDatabase() {
     const conversation = {
       id: id(),
       participantIds: [a.id, b.id],
+      scope: 'public',
       createdAt,
       updatedAt,
       modes: modes(a, b),

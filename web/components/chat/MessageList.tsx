@@ -7,8 +7,15 @@ import { Modal } from '@/components/ui/Modal';
 import { mediaUrl } from '@/lib/api';
 import { formatBytes, formatDayLabel, isSameDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Attachment, Message, User } from '@/lib/types';
+import type { Attachment, Message, MessageKind, User } from '@/lib/types';
 import { MessageBubble } from './MessageBubble';
+
+interface ViewOnceResult {
+  url: string;
+  name: string;
+  mime: string;
+  kind: MessageKind;
+}
 
 interface MessageListProps {
   conversationId: string | null;
@@ -22,6 +29,8 @@ interface MessageListProps {
   activeMatchId?: string | null;
   onRetry?: () => void;
   onReact: (messageId: string, emoji: string) => void;
+  onViewOnce: (message: Message) => Promise<ViewOnceResult | null>;
+  onUnsend: (message: Message) => void;
 }
 
 function MessageSkeleton({ mine }: { mine: boolean }) {
@@ -48,6 +57,8 @@ export function MessageList({
   activeMatchId,
   onRetry,
   onReact,
+  onViewOnce,
+  onUnsend,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -55,6 +66,25 @@ export function MessageList({
   const [atBottom, setAtBottom] = useState(true);
   const [unseen, setUnseen] = useState(0);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
+  const [lightboxOnce, setLightboxOnce] = useState(false);
+
+  async function openViewOnce(message: Message) {
+    const opened = await onViewOnce(message);
+    if (!opened) return;
+    setLightbox({
+      url: opened.url,
+      name: opened.name,
+      mime: opened.mime,
+      size: 0,
+      kind: opened.kind,
+    });
+    setLightboxOnce(true);
+  }
+
+  function openImage(attachment: Attachment) {
+    setLightboxOnce(false);
+    setLightbox(attachment);
+  }
 
   useEffect(() => {
     stickRef.current = true;
@@ -203,7 +233,9 @@ export function MessageList({
                   searchQuery={searchQuery}
                   activeMatch={message.id === activeMatchId}
                   onReact={onReact}
-                  onOpenImage={setLightbox}
+                  onOpenImage={openImage}
+                  onViewOnce={(target) => void openViewOnce(target)}
+                  onUnsend={onUnsend}
                 />
               </div>
             ))}
@@ -247,11 +279,16 @@ export function MessageList({
 
       <Modal
         open={!!lightbox}
-        onClose={() => setLightbox(null)}
+        onClose={() => {
+          setLightbox(null);
+          setLightboxOnce(false);
+        }}
         title={lightbox?.name}
         description={
           lightbox
-            ? `${formatBytes(lightbox.size)}${lightbox.width ? ` · ${lightbox.width}×${lightbox.height}` : ''}`
+            ? lightboxOnce
+              ? 'View once · this media is removed after you close it.'
+              : `${formatBytes(lightbox.size)}${lightbox.width ? ` · ${lightbox.width}×${lightbox.height}` : ''}`
             : undefined
         }
         className="max-w-3xl"
@@ -264,17 +301,35 @@ export function MessageList({
               alt={lightbox.name}
               className="mx-auto max-h-[70dvh] w-auto rounded-lg object-contain"
             />
-            <div className="flex justify-end px-1 pt-3">
-              <a
-                href={mediaUrl(lightbox.url)}
-                download={lightbox.name}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1.5 text-[11px] font-medium text-ink transition-colors hover:border-line-strong"
-              >
-                <Download size={12} />
-                Download original
-              </a>
+            <div className="flex items-center justify-between gap-3 px-1 pt-3">
+              <span className="text-[10px] text-faint">
+                {lightboxOnce
+                  ? 'This is the only time this media can be opened.'
+                  : 'Media stays available in this chat.'}
+              </span>
+              {lightboxOnce ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLightbox(null);
+                    setLightboxOnce(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-accent-ink transition-colors hover:bg-accent-hover"
+                >
+                  Close
+                </button>
+              ) : (
+                <a
+                  href={mediaUrl(lightbox.url)}
+                  download={lightbox.name}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1.5 text-[11px] font-medium text-ink transition-colors hover:border-line-strong"
+                >
+                  <Download size={12} />
+                  Download original
+                </a>
+              )}
             </div>
           </div>
         )}

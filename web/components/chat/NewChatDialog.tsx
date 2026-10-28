@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/AuthProvider';
 import { presenceText } from '@/lib/format';
+import { isPrivateSite } from '@/lib/site';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 
@@ -23,7 +24,12 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
   const [searching, setSearching] = useState(false);
   const [startingName, setStartingName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [privateSite, setPrivateSite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPrivateSite(isPrivateSite());
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +91,11 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
       open={open}
       onClose={onClose}
       title="New conversation"
-      description="Search the workspace directory or enter an exact username to start instantly."
+      description={
+        privateSite
+          ? 'Search your family directory or enter an exact username to start instantly.'
+          : 'Search the workspace directory or enter an exact username to start instantly.'
+      }
       className="max-w-md"
     >
       <div className="p-4">
@@ -127,7 +137,7 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
         )}
 
         <p className="mb-2 mt-4 text-[9px] font-semibold uppercase tracking-[0.14em] text-faint">
-          {term ? 'Matching people' : 'Workspace directory'}
+          {term ? 'Matching people' : privateSite ? 'Family directory' : 'Workspace directory'}
         </p>
 
         <div className="scrollbar-thin -mx-1 max-h-[280px] overflow-y-auto px-1">
@@ -195,8 +205,9 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
         </div>
 
         <p className="mt-4 border-t border-line pt-3 text-[10px] leading-relaxed text-faint">
-          Usernames are unique across the workspace. Entering an exact username creates the direct
-          thread immediately — no invitation required.
+          {privateSite
+            ? 'Usernames are unique inside this family workspace. Nothing here is visible to public Relay accounts.'
+            : 'Usernames are unique across the public workspace. Entering an exact username creates the direct thread immediately — no invitation required.'}
         </p>
       </div>
     </Modal>

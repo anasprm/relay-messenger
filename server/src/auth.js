@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { findUserById } from './db.js';
 import { SESSION_SECRET, SESSION_TTL_MS } from './config.js';
+import { requestScope, userScope, wrongWorkspaceMessage } from './site.js';
 
 const b64url = (value) => Buffer.from(value).toString('base64url');
 
@@ -47,7 +48,11 @@ export function verifyToken(token) {
   }
 }
 
-/** Express middleware: attaches the live user record to req.user */
+/**
+ * Express middleware: attaches the live user record to req.user.
+ * The account's workspace must match the site the request came from, so a
+ * public account cannot read the private family workspace and vice versa.
+ */
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -58,7 +63,17 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });
   }
 
+  const scope = requestScope(req);
+  if (userScope(user) !== scope) {
+    return res.status(403).json({
+      error: wrongWorkspaceMessage(userScope(user)),
+      code: 'wrong-workspace',
+      scope: userScope(user),
+    });
+  }
+
   req.user = user;
   req.token = token;
+  req.scope = scope;
   next();
 }

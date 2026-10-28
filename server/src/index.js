@@ -9,6 +9,7 @@ import { firebaseStatus, probeStorage } from './firebase.js';
 import { storageStatus } from './storage.js';
 import { registerRealtime } from './realtime.js';
 import { ensureSeedAssets } from './seed.js';
+import { conversationScope, userScope } from './site.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
@@ -25,7 +26,7 @@ app.use(
       return callback(null, false);
     },
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Relay-Site'],
     maxAge: 86400,
   }),
 );
@@ -34,12 +35,26 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
   const db = getDb();
+  const countScope = (scope) => {
+    const users = db.users.filter((user) => userScope(user) === scope);
+    const conversations = db.conversations.filter(
+      (conversation) => conversationScope(conversation) === scope,
+    );
+    const conversationIds = new Set(conversations.map((conversation) => conversation.id));
+    return {
+      users: users.length,
+      conversations: conversations.length,
+      messages: db.messages.filter((message) => conversationIds.has(message.conversationId)).length,
+    };
+  };
+
   res.json({
     ok: true,
     service: 'relay-api',
     users: db.users.length,
     conversations: db.conversations.length,
     messages: db.messages.length,
+    workspaces: { private: countScope('private'), public: countScope('public') },
     database: dbStatus(),
     firebase: firebaseStatus(),
     storage: storageStatus(),

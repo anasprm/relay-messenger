@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, Flame, Image as ImageIcon, Mic, Pin, Star, Video } from 'lucide-react';
+import { FileText, Flame, Image as ImageIcon, Lock, Mic, Pin, Star, Video } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { formatSnippetTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -50,7 +50,11 @@ export function ConversationRow({
   const { other, lastMessage, unreadCount } = conversation;
   const unread = unreadCount > 0;
   const isMine = lastMessage?.senderId === meId;
-  const preview = lastMessage ? messagePreview(lastMessage) : 'No messages yet';
+  const preview = conversation.locked
+    ? 'Locked chat'
+    : lastMessage
+      ? messagePreview(lastMessage)
+      : 'No messages yet';
   const draftText = draft?.trim();
 
   return (
@@ -88,7 +92,12 @@ export function ConversationRow({
         </span>
 
         <span className="mt-0.5 flex min-h-[18px] items-center gap-1.5">
-          {typing ? (
+          {conversation.locked ? (
+            <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted">
+              <Lock size={11} className="shrink-0 text-faint" />
+              <span className="truncate">Locked chat · tap to unlock</span>
+            </span>
+          ) : typing ? (
             <span className="truncate text-[12px] font-medium text-accent">typing…</span>
           ) : draftText ? (
             <span className="truncate text-[12px] text-accent">

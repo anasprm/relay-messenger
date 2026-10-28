@@ -1,4 +1,5 @@
 import type { Attachment } from './types';
+import { siteScope } from './site';
 
 export const API_URL = (
   process.env.NEXT_PUBLIC_API_URL ||
@@ -41,6 +42,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const token = readToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  headers.set('X-Relay-Site', siteScope());
 
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -77,9 +79,12 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) }),
 };
 
 export function mediaUrl(path: string | null | undefined): string {
@@ -119,6 +124,7 @@ export function uploadAttachment(
 
     const token = readToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('X-Relay-Site', siteScope());
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) return;

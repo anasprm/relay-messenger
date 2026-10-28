@@ -1,17 +1,21 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronLeft,
   ChevronUp,
   Ghost,
   Info,
+  Lock,
+  LockOpen,
   Maximize2,
   Minimize2,
+  MoreVertical,
   Phone,
   Search,
   ShieldCheck,
+  Trash2,
   Video,
   WifiOff,
   X,
@@ -41,6 +45,10 @@ interface ChatHeaderProps {
   onOpenInfo: () => void;
   onToggleFocus: () => void;
   onBack: () => void;
+  onClearChat: () => void;
+  locked: boolean;
+  onLockChat: () => void;
+  onRemoveLock: () => void;
 }
 
 export function ChatHeader({
@@ -63,10 +71,32 @@ export function ChatHeader({
   onOpenInfo,
   onToggleFocus,
   onBack,
+  onClearChat,
+  locked,
+  onLockChat,
+  onRemoveLock,
 }: ChatHeaderProps) {
   const { other, modes } = conversation;
   const peer = { ...other, online };
   const searchRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -193,6 +223,57 @@ export function ChatHeader({
           >
             <Info size={18} />
           </button>
+
+          <div ref={menuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-label="More conversation actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title="More"
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-full transition-colors sm:h-9 sm:w-9',
+                menuOpen ? 'bg-panel-2 text-ink' : 'text-muted hover:bg-panel-2 hover:text-ink',
+              )}
+            >
+              <MoreVertical size={18} />
+            </button>
+
+            {menuOpen && (
+              <div
+                role="menu"
+                aria-label="Conversation actions"
+                className="absolute right-0 top-full z-50 mt-1.5 w-52 overflow-hidden rounded-xl border border-line bg-elevated p-1 shadow-[0_18px_50px_-18px_rgba(15,23,42,0.5)] animate-pop-in"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    if (locked) onRemoveLock();
+                    else onLockChat();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                >
+                  {locked ? <LockOpen size={14} className="text-muted" /> : <Lock size={14} className="text-muted" />}
+                  {locked ? 'Remove chat lock' : 'Lock chat'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onClearChat();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-danger transition-colors hover:bg-danger/10"
+                >
+                  <Trash2 size={14} />
+                  Clear chat
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

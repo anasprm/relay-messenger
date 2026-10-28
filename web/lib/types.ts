@@ -7,6 +7,8 @@ export interface User {
   username: string;
   displayName: string;
   accent: Accent;
+  avatarUrl?: string | null;
+  discoverable?: boolean;
   online: boolean;
   lastSeen: string | null;
   anonymous?: boolean;
@@ -33,6 +35,8 @@ export interface Message {
   attachment: Attachment | null;
   anonymous: boolean;
   ephemeral: boolean;
+  viewOnce: boolean;
+  viewOnceOpened: boolean;
   reactions: Record<string, string>;
   createdAt: string;
 }
@@ -49,6 +53,7 @@ export interface Conversation {
   lastMessage: Message | null;
   unreadCount: number;
   modes: Modes;
+  locked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,4 +67,5 @@ export interface SendMessagePayload {
   text?: string;
   kind?: MessageKind;
   attachment?: Attachment | null;
+  viewOnce?: boolean;
 }

@@ -16,7 +16,9 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { errorMessage, useAuth } from '@/lib/AuthProvider';
+import { errorMessage, consumeAuthNotice, useAuth } from '@/lib/AuthProvider';
+import { api } from '@/lib/api';
+import { siteScope, type SiteScope } from '@/lib/site';
 import { cn } from '@/lib/utils';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
@@ -30,6 +32,12 @@ const DEMO_ACCOUNTS = [
   { username: 'bob', password: 'bob123', name: 'Bob Chen', accent: 'emerald' as const },
 ];
 
+/** Demo credentials are a local-development convenience, never shown in production. */
+function showDemoAccounts() {
+  if (typeof window === 'undefined') return false;
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
+}
+
 interface AuthScreenProps {
   mode: 'login' | 'register';
 }
@@ -41,11 +49,31 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [site, setSite] = useState<SiteScope>('public');
+  const [showDemo, setShowDemo] = useState(false);
+  const [inviteRequired, setInviteRequired] = useState(false);
 
   const isRegister = mode === 'register';
+  const privateSite = site === 'private';
+
+  useEffect(() => {
+    const scope = siteScope();
+    setSite(scope);
+    setShowDemo(showDemoAccounts());
+    const notice = consumeAuthNotice();
+    if (notice) setError(notice);
+
+    if (scope === 'private') {
+      api
+        .get<{ privateInviteRequired: boolean }>('/api/auth/config')
+        .then((config) => setInviteRequired(!!config.privateInviteRequired))
+        .catch(() => setInviteRequired(false));
+    }
+  }, []);
 
   useEffect(() => {
     if (!loading && user) router.replace('/chat');
@@ -66,10 +94,14 @@ export function AuthScreen({ mode }: AuthScreenProps) {
       setError('Passwords do not match.');
       return;
     }
+    if (isRegister && privateSite && inviteRequired && !inviteCode.trim()) {
+      setError('Enter the family invite code.');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      if (isRegister) await register(cleanUsername, password);
+      if (isRegister) await register(cleanUsername, password, inviteCode.trim() || undefined);
       else await login(cleanUsername, password);
       router.replace('/chat');
     } catch (caught) {
@@ -102,7 +134,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
           <div className="relative mt-10 max-w-lg">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Private workspace messaging
+              {privateSite ? 'Private family workspace' : 'Public workspace messaging'}
             </div>
             <h1 className="mt-5 text-[40px] font-semibold leading-[1.08] tracking-[-0.03em] text-white xl:text-[46px]">
               Communication,
@@ -110,8 +142,9 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               without the noise.
             </h1>
             <p className="mt-5 max-w-md text-[14px] leading-relaxed text-white/55">
-              Direct threads, real-time presence, and peer-to-peer calls — wrapped in a calm,
-              enterprise-grade interface built for focused teams.
+              {privateSite
+                ? 'A quiet, private space for the family. Direct threads, voice notes, and calls — with nothing public attached.'
+                : 'Direct threads, real-time presence, and peer-to-peer calls — wrapped in a calm, enterprise-grade interface built for focused teams.'}
             </p>
 
             <ul className="mt-8 grid gap-3 text-[13px] text-white/70">
@@ -188,15 +221,31 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               <div className="mb-7">
                 <div className="inline-flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  Workspace online
+                  {privateSite
+                    ? inviteRequired
+                      ? 'Family workspace · invite only'
+                      : 'Family workspace · open sign-up'
+                    : 'Public workspace · open sign-up'}
                 </div>
                 <h2 className="mt-5 text-[26px] font-semibold tracking-[-0.02em] text-ink">
-                  {isRegister ? 'Create your account' : 'Sign in to Relay'}
+                  {isRegister
+                    ? privateSite
+                      ? 'Create your family account'
+                      : 'Create your account'
+                    : privateSite
+                      ? 'Sign in to your family space'
+                      : 'Sign in to Relay'}
                 </h2>
                 <p className="mt-2 text-[13px] leading-relaxed text-muted">
                   {isRegister
-                    ? 'Pick a unique username. Teammates can start a thread with you instantly.'
-                    : 'Enter your credentials to continue to your conversations.'}
+                    ? privateSite
+                      ? inviteRequired
+                        ? 'Pick a username and enter the invite code from the family owner. Only this family workspace will be visible to you.'
+                        : 'Pick a username. Only this family workspace will be visible to you.'
+                      : 'Pick a unique username. Anyone on Relay can start a thread with you instantly.'
+                    : privateSite
+                      ? 'This workspace is private. Only family accounts can sign in here.'
+                      : 'Enter your credentials to continue to your conversations.'}
                 </p>
               </div>
 
@@ -292,6 +341,37 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   </div>
                 )}
 
+                {isRegister && privateSite && inviteRequired && (
+                  <div>
+                    <label
+                      htmlFor="inviteCode"
+                      className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted"
+                    >
+                      Family invite code
+                    </label>
+                    <div className="relative">
+                      <ShieldCheck
+                        size={15}
+                        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-faint"
+                      />
+                      <input
+                        id="inviteCode"
+                        name="inviteCode"
+                        value={inviteCode}
+                        onChange={(event) => setInviteCode(event.target.value)}
+                        autoComplete="off"
+                        autoCapitalize="characters"
+                        spellCheck={false}
+                        placeholder="Code from the family owner"
+                        className="h-11 w-full rounded-xl border border-line bg-panel-2 pl-10 pr-3.5 text-sm text-ink placeholder:text-faint transition-colors focus:border-accent focus:bg-panel focus:outline-none focus:ring-4 focus:ring-accent/10"
+                      />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-faint">
+                      Invite-only. Accounts created here stay inside this family workspace.
+                    </p>
+                  </div>
+                )}
+
                 {error && (
                   <div
                     role="alert"
@@ -327,47 +407,50 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               </form>
 
               <p className="mt-5 text-center text-[13px] text-muted">
-                {isRegister ? 'Already have an account?' : 'New to Relay?'}{' '}
+                {isRegister ? 'Already have an account?' : privateSite ? 'New to this workspace?' : 'New to Relay?'}{' '}
                 <Link
                   href={isRegister ? '/login' : '/register'}
                   className="font-semibold text-accent transition-colors hover:text-accent-hover"
                 >
-                  {isRegister ? 'Sign in' : 'Create an account'}
+                  {isRegister ? 'Sign in' : privateSite ? 'Create a family account' : 'Create an account'}
                 </Link>
               </p>
 
-              <div className="mt-8 rounded-2xl border border-line bg-panel p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
-                    Demo workspace
+              {showDemo && !privateSite && (
+                <div className="mt-8 rounded-2xl border border-line bg-panel p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+                      Demo workspace
+                    </p>
+                    <span className="text-[10px] text-faint">Click to autofill</span>
+                  </div>
+                  <div className="mt-3 grid gap-1.5">
+                    {DEMO_ACCOUNTS.map((account) => (
+                      <button
+                        key={account.username}
+                        type="button"
+                        onClick={() => useDemo(account)}
+                        className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-panel-2"
+                      >
+                        <Avatar user={{ displayName: account.name, accent: account.accent }} size="sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium text-ink">
+                            {account.name}
+                          </span>
+                          <span className="block truncate font-mono text-[10px] text-faint">
+                            {account.username} / {account.password}
+                          </span>
+                        </span>
+                        <ArrowRight size={13} className="text-faint" />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 px-2 text-[10px] leading-relaxed text-faint">
+                    Local development only. Open a second browser profile as Alice or Bob to test
+                    realtime delivery and calls.
                   </p>
-                  <span className="text-[10px] text-faint">Click to autofill</span>
                 </div>
-                <div className="mt-3 grid gap-1.5">
-                  {DEMO_ACCOUNTS.map((account) => (
-                    <button
-                      key={account.username}
-                      type="button"
-                      onClick={() => useDemo(account)}
-                      className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-panel-2"
-                    >
-                      <Avatar user={{ displayName: account.name, accent: account.accent }} size="sm" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium text-ink">
-                          {account.name}
-                        </span>
-                        <span className="block truncate font-mono text-[10px] text-faint">
-                          {account.username} / {account.password}
-                        </span>
-                      </span>
-                      <ArrowRight size={13} className="text-faint" />
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 px-2 text-[10px] leading-relaxed text-faint">
-                  Open a second browser profile as Alice or Bob to test realtime delivery and calls.
-                </p>
-              </div>
+              )}
 
               <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11px] text-faint">
                 <Lock size={11} />

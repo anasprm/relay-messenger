@@ -1,4 +1,5 @@
 import { Shield } from 'lucide-react';
+import { mediaUrl } from '@/lib/api';
 import { cn, initials } from '@/lib/utils';
 import type { Accent, User } from '@/lib/types';
 
@@ -24,7 +25,10 @@ const SIZES = {
 export type AvatarSize = keyof typeof SIZES;
 
 interface AvatarProps {
-  user: Pick<User, 'displayName' | 'accent'> & { anonymous?: boolean };
+  user: Pick<User, 'displayName' | 'accent'> & {
+    avatarUrl?: string | null;
+    anonymous?: boolean;
+  };
   size?: AvatarSize;
   online?: boolean;
   className?: string;
@@ -38,7 +42,7 @@ export function Avatar({ user, size = 'md', online, className, ring }: AvatarPro
     <span className={cn('relative inline-flex shrink-0', className)}>
       <span
         className={cn(
-          'inline-flex items-center justify-center rounded-full bg-gradient-to-br font-semibold uppercase tracking-wide text-white shadow-sm',
+          'inline-flex items-center justify-center overflow-hidden rounded-full bg-gradient-to-br font-semibold uppercase tracking-wide text-white shadow-sm',
           ACCENTS[user.accent] || ACCENTS.slate,
           SIZES[size],
           ring && 'ring-2 ring-panel',
@@ -46,7 +50,19 @@ export function Avatar({ user, size = 'md', online, className, ring }: AvatarPro
         aria-hidden="true"
         title={user.displayName}
       >
-        {user.anonymous ? <Shield size={iconSize} /> : initials(user.displayName)}
+        {user.anonymous ? (
+          <Shield size={iconSize} />
+        ) : user.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={mediaUrl(user.avatarUrl)}
+            alt=""
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          initials(user.displayName)
+        )}
       </span>
       {online === true && (
         <span
