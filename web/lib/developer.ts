@@ -15,7 +15,7 @@ export const DEVELOPER = {
   email: 'anaspmatwork@gmail.com',
   website: '',
   github: '',
-  instagram: 'https://instagram.com/_mhd.anasyy',
+  instagram: 'https://instagram.com/mhd.anasyy',
   /** Optional short line under the links, e.g. "Built with Next.js and Socket.IO". */
   note: '',
 };
