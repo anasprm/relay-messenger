@@ -25,7 +25,7 @@ app.use(
       if (!origin || CLIENT_ORIGINS.includes(origin)) return callback(null, true);
       return callback(null, false);
     },
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Relay-Site'],
     maxAge: 86400,
   }),
