@@ -7,6 +7,21 @@ export function inferKind(mime = '') {
   return 'file';
 }
 
+/**
+ * Profile photos may be a small inline data URL so they survive redeploys on
+ * hosts without durable object storage. 400k chars is roughly 300 KB of image.
+ */
+export function isSafeAvatarUrl(url) {
+  if (typeof url !== 'string' || !url) return false;
+  if (url.startsWith('data:image/')) {
+    return (
+      /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(url) &&
+      url.length <= 400_000
+    );
+  }
+  return isSafeUploadUrl(url);
+}
+
 export function isSafeUploadUrl(url) {
   if (typeof url !== 'string' || !url) return false;
 

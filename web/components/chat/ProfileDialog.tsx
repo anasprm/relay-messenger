@@ -18,13 +18,36 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { UiStyleToggle } from '@/components/ui/UiStyleToggle';
-import { api, uploadAttachment } from '@/lib/api';
+import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/AuthProvider';
 import { useToast } from '@/lib/ToastProvider';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const AVATAR_SIZE = 256;
+
+/**
+ * Downscale the chosen photo to a small square JPEG data URL. Keeping it inline
+ * means the avatar survives server restarts even when object storage is absent.
+ */
+async function toAvatarDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = AVATAR_SIZE;
+  canvas.height = AVATAR_SIZE;
+
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not read that image.');
+
+  const scale = Math.max(AVATAR_SIZE / bitmap.width, AVATAR_SIZE / bitmap.height);
+  const width = bitmap.width * scale;
+  const height = bitmap.height * scale;
+  context.drawImage(bitmap, (AVATAR_SIZE - width) / 2, (AVATAR_SIZE - height) / 2, width, height);
+  bitmap.close?.();
+
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
 
 interface ProfileDialogProps {
   open: boolean;
@@ -90,8 +113,7 @@ export function ProfileDialog({ open, user, onClose, onLogout, onSaved }: Profil
     setUploading(true);
     setError(null);
     try {
-      const uploaded = await uploadAttachment(file, { filename: file.name });
-      setAvatarUrl(uploaded.url);
+      setAvatarUrl(await toAvatarDataUrl(file));
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

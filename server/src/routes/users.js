@@ -3,7 +3,7 @@ import { requireAuth } from '../auth.js';
 import { getDb, persistUser } from '../db.js';
 import { publicUser } from '../serializers.js';
 import { userScope } from '../site.js';
-import { isSafeUploadUrl, sanitizeText } from '../utils.js';
+import { isSafeAvatarUrl, sanitizeText } from '../utils.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -60,7 +60,7 @@ router.patch('/me', async (req, res, next) => {
         user.avatarUrl = null;
       } else {
         const avatarUrl = String(body.avatarUrl);
-        if (!isSafeUploadUrl(avatarUrl)) {
+        if (!isSafeAvatarUrl(avatarUrl)) {
           return res.status(400).json({ error: 'Invalid profile photo URL.' });
         }
         user.avatarUrl = avatarUrl;
