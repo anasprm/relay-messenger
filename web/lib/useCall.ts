@@ -29,6 +29,11 @@ interface UseCallOptions {
   socket: Socket | null;
   onError?: (message: string) => void;
   onInfo?: (message: string) => void;
+  /**
+   * Set while a group call is running, so a one-to-one call cannot start on
+   * top of it (and an incoming one is declined as busy).
+   */
+  busyRef?: { current: boolean };
 }
 
 const IDLE: CallState = {
@@ -68,7 +73,7 @@ function buildIceServers(): RTCIceServer[] {
   ];
 }
 
-const ICE_SERVERS = buildIceServers();
+export const ICE_SERVERS = buildIceServers();
 
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
@@ -104,7 +109,7 @@ function blockedMessage(kind: CallKind): string {
   }, then start the call again.`;
 }
 
-function mediaErrorMessage(error: unknown, kind: CallKind): string {
+export function mediaErrorMessage(error: unknown, kind: CallKind): string {
   const name = error instanceof DOMException ? error.name : '';
   if (name === 'NotAllowedError' || name === 'SecurityError') {
     return blockedMessage(kind);
@@ -132,7 +137,7 @@ function cameraFallbackNotice(name: string): string {
  * Requests media inside the click gesture. A separate camera request is only made
  * after a failed combined request, so a blocked camera never prevents an audio call.
  */
-async function acquireMedia(
+export async function acquireMedia(
   kind: CallKind,
   onNotice?: (message: string) => void,
 ): Promise<MediaStream> {
@@ -162,7 +167,7 @@ async function acquireMedia(
   }
 }
 
-export function useCall({ socket, onError, onInfo }: UseCallOptions) {
+export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
   const [call, setCall] = useState<CallState>(IDLE);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -253,6 +258,10 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
         onErrorRef.current?.('You are already on a call.');
         return;
       }
+      if (busyRef?.current) {
+        onErrorRef.current?.('You are already on a group call.');
+        return;
+      }
       if (!conversation.other) return;
 
       updateCall(() => ({
@@ -298,7 +307,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
         cleanup();
       }
     },
-    [buildPeer, cleanup, socket, updateCall],
+    [buildPeer, cleanup, socket, updateCall, busyRef],
   );
 
   const accept = useCallback(async () => {
@@ -420,7 +429,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
     const onIncoming = (payload: IncomingCall) => {
       if (!payload?.from) return;
 
-      if (callRef.current.status !== 'idle') {
+      if (callRef.current.status !== 'idle' || busyRef?.current) {
         socket.emit('call:decline', {
           to: payload.from.id,
           conversationId: payload.conversationId,
@@ -562,7 +571,7 @@ export function useCall({ socket, onError, onInfo }: UseCallOptions) {
       socket.off('call:unavailable', onUnavailable);
       socket.off('call:ended', onEnded);
     };
-  }, [cleanup, hangUpWithNotice, socket, updateCall]);
+  }, [cleanup, hangUpWithNotice, socket, updateCall, busyRef]);
 
   useEffect(() => {
     return () => {

@@ -255,26 +255,24 @@ export function ContactPanel({
                   : 'Offline'}
           </p>
 
-          {!group && (
-            <div className="mt-4 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onStartAudio}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
-              >
-                <Phone size={14} />
-                Audio
-              </button>
-              <button
-                type="button"
-                onClick={onStartVideo}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
-              >
-                <Video size={15} />
-                Video
-              </button>
-            </div>
-          )}
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onStartAudio}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
+            >
+              <Phone size={14} />
+              Audio
+            </button>
+            <button
+              type="button"
+              onClick={onStartVideo}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
+            >
+              <Video size={15} />
+              Video
+            </button>
+          </div>
         </div>
 
         {group && (

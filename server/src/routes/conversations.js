@@ -21,6 +21,7 @@ import {
   broadcastMessage,
   broadcastModes,
   broadcastPurge,
+  removeUserFromGroupCall,
 } from '../realtime.js';
 import {
   MESSAGE_KINDS,
@@ -310,6 +311,7 @@ router.delete('/:id/members/:userId', async (req, res, next) => {
     await persistConversation(conversation);
 
     broadcastConversationRemoved(req.app.locals.io, conversation, targetId);
+    removeUserFromGroupCall(req.app.locals.io, conversation.id, targetId);
     broadcastConversationRefresh(req.app.locals.io, conversation);
     res.json({ ok: true, participantIds: conversation.participantIds });
   } catch (error) {
@@ -331,6 +333,7 @@ router.post('/:id/leave', async (req, res, next) => {
     if (conversation.locks) delete conversation.locks[req.user.id];
 
     broadcastConversationRemoved(req.app.locals.io, conversation, req.user.id);
+    removeUserFromGroupCall(req.app.locals.io, conversation.id, req.user.id, 'left');
 
     if (remaining.length === 0) {
       // Nobody left: drop the thread and its messages instead of leaving an

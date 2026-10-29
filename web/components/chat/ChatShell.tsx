@@ -6,6 +6,7 @@ import type { Socket } from 'socket.io-client';
 
 import { CallOverlay } from './CallOverlay';
 import { CallPermissionNotice } from './CallPermissionNotice';
+import { GroupCallOverlay } from './GroupCallOverlay';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
 import { ContactPanel } from './ContactPanel';
@@ -29,7 +30,8 @@ import { favoritesKey, pinnedKey, readIdSet, writeIdSet } from '@/lib/localSets'
 import { createSocket } from '@/lib/socket';
 import { isPrivateSite } from '@/lib/site';
 import { useToast } from '@/lib/ToastProvider';
-import { useCall } from '@/lib/useCall';
+import { useCall, type CallKind } from '@/lib/useCall';
+import { useGroupCall } from '@/lib/useGroupCall';
 import { useMediaPermission } from '@/lib/useMediaPermission';
 import { cn } from '@/lib/utils';
 import type { Conversation, Message, MessageKind, Modes, SendMessagePayload } from '@/lib/types';
@@ -1086,6 +1088,9 @@ export function ChatShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [focusMode, mobileThreadOpen]);
 
+  const oneToOneBusyRef = useRef(false);
+  const groupCallBusyRef = useRef(false);
+
   const {
     call,
     localStream,
@@ -1100,21 +1105,57 @@ export function ChatShell() {
     socket,
     onError: (message) => toast(message, 'error'),
     onInfo: (message) => toast(message),
+    busyRef: groupCallBusyRef,
   });
 
+  const {
+    call: groupCall,
+    localStream: groupLocalStream,
+    remoteStreams: groupRemoteStreams,
+    start: startGroupCall,
+    accept: acceptGroupCall,
+    decline: declineGroupCall,
+    leave: leaveGroupCall,
+    toggleMute: toggleGroupMute,
+    toggleCamera: toggleGroupCamera,
+  } = useGroupCall({
+    socket,
+    me: user,
+    onError: (message) => toast(message, 'error'),
+    onInfo: (message) => toast(message),
+    onOpenConversation: selectConversation,
+    oneToOneBusyRef,
+  });
+
+  useEffect(() => {
+    oneToOneBusyRef.current = call.status !== 'idle';
+  }, [call.status]);
+
+  useEffect(() => {
+    groupCallBusyRef.current = groupCall.status !== 'idle';
+  }, [groupCall.status]);
+
+  const startConversationCall = useCallback(
+    (kind: CallKind) => {
+      setInfoOpen(false);
+      const conversation = activeConversationRef.current;
+      if (!conversation) return;
+      if (isGroupConversation(conversation)) {
+        void startGroupCall(conversation, kind);
+      } else {
+        void startCall(conversation, kind);
+      }
+    },
+    [startCall, startGroupCall],
+  );
+
   const handleAudioCall = useCallback(() => {
-    setInfoOpen(false);
-    if (activeConversationRef.current) {
-      void startCall(activeConversationRef.current, 'audio');
-    }
-  }, [startCall]);
+    startConversationCall('audio');
+  }, [startConversationCall]);
 
   const handleVideoCall = useCallback(() => {
-    setInfoOpen(false);
-    if (activeConversationRef.current) {
-      void startCall(activeConversationRef.current, 'video');
-    }
-  }, [startCall]);
+    startConversationCall('video');
+  }, [startConversationCall]);
 
   if (loading || !user) return <Splash label="Preparing your workspace" />;
 
@@ -1240,9 +1281,7 @@ export function ChatShell() {
                     onViewOnce={viewOnceMessage}
                     onUnsend={(message) => setConfirmAction({ type: 'unsend', message })}
                   />
-                  {!isGroupConversation(activeConversation) &&
-                    mediaPermission === 'denied' &&
-                    !mediaNoticeDismissed && (
+                  {mediaPermission === 'denied' && !mediaNoticeDismissed && (
                     <CallPermissionNotice
                       checking={checkingMediaPermission}
                       onDismiss={() => setMediaNoticeDismissed(true)}
@@ -1388,6 +1427,18 @@ export function ChatShell() {
         onEnd={end}
         onToggleMute={toggleMute}
         onToggleCamera={toggleCamera}
+      />
+
+      <GroupCallOverlay
+        call={groupCall}
+        localStream={groupLocalStream}
+        remoteStreams={groupRemoteStreams}
+        me={user}
+        onAccept={() => void acceptGroupCall()}
+        onDecline={declineGroupCall}
+        onLeave={leaveGroupCall}
+        onToggleMute={toggleGroupMute}
+        onToggleCamera={toggleGroupCamera}
       />
 
       <ConfirmDialog

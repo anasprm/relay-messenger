@@ -202,28 +202,24 @@ export function ChatHeader({
             <Search size={17} />
           </button>
 
-          {!group && (
-            <>
-              <button
-                type="button"
-                onClick={onStartAudio}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
-                aria-label="Start audio call"
-                title="Audio call"
-              >
-                <Phone size={17} />
-              </button>
-              <button
-                type="button"
-                onClick={onStartVideo}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
-                aria-label="Start video call"
-                title="Video call"
-              >
-                <Video size={18} />
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={onStartAudio}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
+            aria-label={group ? 'Start group audio call' : 'Start audio call'}
+            title={group ? 'Group audio call' : 'Audio call'}
+          >
+            <Phone size={17} />
+          </button>
+          <button
+            type="button"
+            onClick={onStartVideo}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
+            aria-label={group ? 'Start group video call' : 'Start video call'}
+            title={group ? 'Group video call' : 'Video call'}
+          >
+            <Video size={18} />
+          </button>
 
           <button
             type="button"

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { findConversation, findUserById, isGroupConversation, persistUser } from './db.js';
 import { verifyToken } from './auth.js';
 import * as presence from './presence.js';
@@ -71,6 +72,94 @@ export function broadcastConversationRefresh(io, conversation) {
 export function broadcastConversationRemoved(io, conversation, userId) {
   io.to(`user:${userId}`).emit('conversation:removed', {
     conversationId: conversation.id,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Group calls — an ephemeral full-mesh WebRTC room per group.
+ *
+ * The server never touches media. It keeps who is in the room, rings the
+ * online members when a call starts, and relays SDP/ICE between every pair.
+ * Rooms live in memory and disappear when the last person leaves.
+ * ------------------------------------------------------------------ */
+
+const groupCallRooms = new Map();
+
+function groupRoomSummary(room) {
+  return {
+    callId: room.id,
+    conversationId: room.conversationId,
+    kind: room.kind,
+    startedBy: room.startedBy,
+    createdAt: room.createdAt,
+    participants: [...room.participants.entries()]
+      .map(([userId, state]) => {
+        const member = findUserById(userId);
+        if (!member) return null;
+        return {
+          ...publicUser(member),
+          muted: !!state.muted,
+          cameraOn: !!state.cameraOn,
+        };
+      })
+      .filter(Boolean),
+  };
+}
+
+function emitToRoom(io, room, event, payload, exceptUserId = null) {
+  for (const userId of room.participants.keys()) {
+    if (userId === exceptUserId) continue;
+    io.to(`user:${userId}`).emit(event, payload);
+  }
+}
+
+/** Resolves a socket's group conversation, or null when access is not allowed. */
+function groupConversationFor(conversationId, userId, scope) {
+  const conversation = findConversation(conversationId);
+  if (!isGroupConversation(conversation)) return null;
+  if (conversationScope(conversation) !== scope) return null;
+  if (!conversation.participantIds.includes(userId)) return null;
+  return conversation;
+}
+
+function removeFromGroupCall(io, room, userId, reason) {
+  if (!room.participants.delete(userId)) return false;
+
+  emitToRoom(io, room, 'group:call:left', {
+    conversationId: room.conversationId,
+    callId: room.id,
+    userId,
+    reason,
+    participants: groupRoomSummary(room).participants,
+  });
+
+  if (room.participants.size === 0) {
+    groupCallRooms.delete(room.conversationId);
+    const conversation = findConversation(room.conversationId);
+    for (const participantId of conversation?.participantIds || []) {
+      io.to(`user:${participantId}`).emit('group:call:ended', {
+        conversationId: room.conversationId,
+        callId: room.id,
+        reason: 'empty',
+      });
+    }
+  }
+
+  return true;
+}
+
+/** Ends a person's group-call presence, e.g. when the creator removes them. */
+export function removeUserFromGroupCall(io, conversationId, userId, reason = 'removed') {
+  const room = groupCallRooms.get(conversationId);
+  if (!room) return;
+  const removed = removeFromGroupCall(io, room, userId, reason);
+  if (!removed) return;
+
+  // Tell the person who left or was removed, so their overlay closes immediately.
+  io.to(`user:${userId}`).emit('group:call:ended', {
+    conversationId,
+    callId: room.id,
+    reason,
   });
 }
 
@@ -152,7 +241,7 @@ export function registerRealtime(io) {
       if (isGroupConversation(conversation)) {
         socket.emit('call:unavailable', {
           conversationId: conversation.id,
-          reason: 'Calls are one-to-one, so they are not available in group chats.',
+          reason: 'Use the group call buttons to call everyone in this group.',
         });
         return;
       }
@@ -219,7 +308,165 @@ export function registerRealtime(io) {
       });
     });
 
+    /** Starts a group room, or joins the one already running in this group. */
+    socket.on('group:call:start', (payload = {}) => {
+      const conversation = groupConversationFor(payload.conversationId, user.id, scope);
+      if (!conversation) return;
+
+      const kind = payload.kind === 'video' ? 'video' : 'audio';
+      let room = groupCallRooms.get(conversation.id);
+
+      if (room && room.kind !== kind) {
+        socket.emit('group:call:unavailable', {
+          conversationId: conversation.id,
+          reason: `${room.kind === 'audio' ? 'An audio' : 'A video'} call is already running in this group.`,
+        });
+        return;
+      }
+
+      if (room && room.participants.has(user.id)) {
+        socket.emit('group:call:joined', groupRoomSummary(room));
+        return;
+      }
+
+      const created = !room;
+      if (!room) {
+        room = {
+          id: crypto.randomUUID(),
+          conversationId: conversation.id,
+          kind,
+          startedBy: user.id,
+          createdAt: new Date().toISOString(),
+          participants: new Map(),
+        };
+        groupCallRooms.set(conversation.id, room);
+      }
+
+      const existing = [...room.participants.keys()];
+      room.participants.set(user.id, { muted: false, cameraOn: kind === 'video' });
+
+      socket.emit('group:call:joined', { ...groupRoomSummary(room), existing });
+      emitToRoom(
+        io,
+        room,
+        'group:call:peer-joined',
+        { ...groupRoomSummary(room), joined: publicUser(user) },
+        user.id,
+      );
+
+      if (!created) return;
+
+      // Ring every other member who is online right now.
+      for (const memberId of conversation.participantIds) {
+        if (memberId === user.id) continue;
+        if (!presence.isOnline(memberId)) continue;
+
+        io.to(`user:${memberId}`).emit('group:call:ringing', {
+          callId: room.id,
+          conversationId: conversation.id,
+          title: conversation.title || 'Group chat',
+          kind,
+          from: publicUser(user, findUserById(memberId)),
+          participantCount: room.participants.size,
+        });
+      }
+    });
+
+    /** Accepts a group-call ring and joins the running room. */
+    socket.on('group:call:join', (payload = {}) => {
+      const conversation = groupConversationFor(payload.conversationId, user.id, scope);
+      if (!conversation) return;
+
+      const room = groupCallRooms.get(conversation.id);
+      if (!room) {
+        socket.emit('group:call:unavailable', {
+          conversationId: conversation.id,
+          reason: 'That call has already ended.',
+        });
+        return;
+      }
+
+      if (room.participants.has(user.id)) {
+        socket.emit('group:call:joined', { ...groupRoomSummary(room), existing: [] });
+        return;
+      }
+
+      const existing = [...room.participants.keys()];
+      room.participants.set(user.id, { muted: false, cameraOn: room.kind === 'video' });
+
+      socket.emit('group:call:joined', { ...groupRoomSummary(room), existing });
+      emitToRoom(
+        io,
+        room,
+        'group:call:peer-joined',
+        { ...groupRoomSummary(room), joined: publicUser(user) },
+        user.id,
+      );
+    });
+
+    socket.on('group:call:decline', (payload = {}) => {
+      const room = groupCallRooms.get(payload.conversationId);
+      if (!room) return;
+      if (!room.participants.has(user.id)) {
+        const conversation = groupConversationFor(payload.conversationId, user.id, scope);
+        if (!conversation) return;
+      }
+      io.to(`user:${room.startedBy}`).emit('group:call:declined', {
+        conversationId: room.conversationId,
+        from: publicUser(user),
+      });
+    });
+
+    socket.on('group:call:signal', (payload = {}) => {
+      const room = groupCallRooms.get(payload.conversationId);
+      if (!room) return;
+      if (!room.participants.has(user.id)) return;
+      if (!room.participants.has(payload.to)) return;
+
+      io.to(`user:${payload.to}`).emit('group:call:signal', {
+        conversationId: room.conversationId,
+        callId: room.id,
+        from: user.id,
+        data: payload.data || null,
+      });
+    });
+
+    socket.on('group:call:state', (payload = {}) => {
+      const room = groupCallRooms.get(payload.conversationId);
+      if (!room) return;
+      const state = room.participants.get(user.id);
+      if (!state) return;
+
+      state.muted = !!payload.muted;
+      state.cameraOn = !!payload.cameraOn;
+      emitToRoom(
+        io,
+        room,
+        'group:call:state',
+        {
+          conversationId: room.conversationId,
+          callId: room.id,
+          userId: user.id,
+          muted: state.muted,
+          cameraOn: state.cameraOn,
+        },
+        user.id,
+      );
+    });
+
+    socket.on('group:call:leave', (payload = {}) => {
+      const room = groupCallRooms.get(payload.conversationId);
+      if (!room) return;
+      removeFromGroupCall(io, room, user.id, 'left');
+    });
+
     socket.on('disconnect', async () => {
+      for (const room of [...groupCallRooms.values()]) {
+        if (room.participants.has(user.id)) {
+          removeFromGroupCall(io, room, user.id, 'disconnected');
+        }
+      }
+
       const wentOffline = presence.removeSocket(user.id, socket.id);
       if (!wentOffline) return;
 
