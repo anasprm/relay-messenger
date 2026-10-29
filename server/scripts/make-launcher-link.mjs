@@ -4,7 +4,7 @@ import path from 'node:path';
 /**
  * Mints a single-use Relay sign-in link for a shortcut or a phone.
  *
- *   node server/scripts/make-launcher-link.mjs --username anas --days 7
+ *   node server/scripts/make-launcher-link.mjs --username anas
  *
  * How it works: the script signs in normally, asks the API for a one-time
  * launch code, and puts that code in the URL fragment. The code is stored
@@ -25,7 +25,6 @@ function flag(name) {
 
 const username = arg('username');
 const password = arg('password');
-const days = Math.min(Math.max(Number(arg('days', '7')) || 7, 1), 30);
 const site = arg('site', 'private');
 const apiUrl = arg('api', 'https://relay-api-amr9.onrender.com').replace(/\/$/, '');
 const appUrl = arg('app', 'https://valiyakath.vercel.app').replace(/\/$/, '');
@@ -34,7 +33,7 @@ const keepOld = flag('keep-old');
 
 if (!username) {
   console.error(
-    'Usage: node server/scripts/make-launcher-link.mjs --username <name> [--days 7] [--out file] [--keep-old]',
+    'Usage: node server/scripts/make-launcher-link.mjs --username <name> [--out file] [--keep-old]',
   );
   process.exit(1);
 }
