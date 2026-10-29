@@ -17,6 +17,20 @@ const TOKEN_KEY = 'relay.token';
  */
 const LAUNCHER_PREFIX = '#relay-token=';
 
+/** Drop the launcher fragment from the address bar (never leaves the page). */
+function scrubLauncherHash(): void {
+  try {
+    if (!window.location.hash.startsWith(LAUNCHER_PREFIX)) return;
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  } catch {
+    /* history is optional */
+  }
+}
+
 export function consumeLauncherToken(): boolean {
   if (typeof window === 'undefined') return false;
   const { hash } = window.location;
@@ -30,21 +44,21 @@ export function consumeLauncherToken(): boolean {
   }
 
   if (token) writeToken(token);
-
-  try {
-    window.history.replaceState(
-      null,
-      '',
-      `${window.location.pathname}${window.location.search}`,
-    );
-  } catch {
-    /* history is optional */
-  }
-
+  scrubLauncherHash();
   return Boolean(token);
 }
 
-if (typeof window !== 'undefined') consumeLauncherToken();
+if (typeof window !== 'undefined' && consumeLauncherToken()) {
+  /**
+   * Next.js re-applies the URL it rendered with once hydration finishes, which
+   * puts the fragment back. Scrub again after it settles so the token never
+   * lingers in the address bar or in history.
+   */
+  for (const delay of [0, 60, 250, 1000]) {
+    window.setTimeout(scrubLauncherHash, delay);
+  }
+  window.addEventListener('hashchange', scrubLauncherHash);
+}
 
 export class ApiError extends Error {
   status: number;
