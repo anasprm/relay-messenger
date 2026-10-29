@@ -22,9 +22,16 @@ function signature(payload) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
 }
 
-export function signToken(user) {
+export function signToken(user, ttlMs = SESSION_TTL_MS) {
   const payload = b64url(
-    JSON.stringify({ sub: user.id, username: user.username, exp: Date.now() + SESSION_TTL_MS }),
+    JSON.stringify({
+      sub: user.id,
+      username: user.username,
+      // Session generation: bumping it on the user record revokes every token
+      // already handed out, without changing SESSION_SECRET.
+      sv: user.sessionVersion || 0,
+      exp: Date.now() + ttlMs,
+    }),
   );
   return `${payload}.${signature(payload)}`;
 }
@@ -61,6 +68,13 @@ export function requireAuth(req, res, next) {
 
   if (!user) {
     return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });
+  }
+
+  if ((claims.sv || 0) !== (user.sessionVersion || 0)) {
+    return res.status(401).json({
+      error: 'This session was signed out. Please sign in again.',
+      code: 'session-revoked',
+    });
   }
 
   const scope = requestScope(req);

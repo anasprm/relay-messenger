@@ -9,8 +9,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, readToken, writeToken, type ApiError } from './api';
+import { api, launcherReady, readToken, refreshSession, tokenExpiresAt, writeToken, type ApiError } from './api';
 import type { AuthResponse, User } from './types';
+
+/** Renew a session once it is inside its last 10 days (of a 30-day lifetime). */
+const SESSION_REFRESH_WINDOW_MS = 20 * 24 * 60 * 60 * 1000;
 
 interface AuthContextValue {
   user: User | null;
@@ -55,20 +58,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    const stored = readToken();
 
-    if (!stored) {
-      setLoading(false);
-      return;
-    }
+    (async () => {
+      // A launcher code in the URL must be exchanged before the session is read.
+      await launcherReady;
+      if (!active) return;
 
-    setToken(stored);
-    api
-      .get<{ user: User }>('/api/auth/me')
-      .then((response) => {
-        if (active) setUser(response.user);
-      })
-      .catch((error: unknown) => {
+      const stored = readToken();
+      if (!stored) {
+        setLoading(false);
+        return;
+      }
+
+      setToken(stored);
+
+      try {
+        const response = await api.get<{ user: User }>('/api/auth/me');
+        if (!active) return;
+        setUser(response.user);
+
+        // Keep an in-use device signed in without a long-lived credential.
+        if (tokenExpiresAt(stored) - Date.now() < SESSION_REFRESH_WINDOW_MS) {
+          const next = await refreshSession();
+          if (next && active) setToken(next);
+        }
+      } catch (error) {
         if (!active) return;
         // Keep the reason so the sign-in screen can explain a workspace mismatch.
         if (error && typeof error === 'object' && 'message' in error) {
@@ -77,10 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         writeToken(null);
         setToken(null);
         setUser(null);
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
 
     return () => {
       active = false;

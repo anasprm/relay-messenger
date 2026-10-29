@@ -1,8 +1,14 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { requireAuth, signToken, hashPassword, verifyPassword } from '../auth.js';
-import { PRIVATE_INVITE_CODE } from '../config.js';
-import { findUserByUsername, getDb, persistUser } from '../db.js';
+import { LAUNCH_CODE_TTL_MS, PRIVATE_INVITE_CODE } from '../config.js';
+import {
+  findUserById,
+  findUserByUsername,
+  getDb,
+  persistLaunchCode,
+  persistUser,
+} from '../db.js';
 import { publicUser } from '../serializers.js';
 import { requestScope, userScope, wrongWorkspaceMessage } from '../site.js';
 
@@ -119,6 +125,161 @@ router.post('/login', (req, res) => {
 
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user), scope: req.scope });
+});
+
+/**
+ * POST /api/auth/refresh — slides the session forward while the app is used, so
+ * an active device never needs a long-lived credential.
+ */
+router.post('/refresh', requireAuth, (req, res) => {
+  res.json({ token: signToken(req.user), user: publicUser(req.user), scope: req.scope });
+});
+
+const codeHash = (code) => crypto.createHash('sha256').update(code).digest('hex');
+
+/** Drop expired launch codes from memory so the list cannot grow forever. */
+function pruneLaunchCodes(db, now = Date.now()) {
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  db.launchCodes = db.launchCodes.filter(
+    (record) => new Date(record.expiresAt).getTime() > cutoff,
+  );
+}
+
+/**
+ * POST /api/auth/launch — mint a single-use sign-in code for a shortcut or a
+ * phone. The code is stored hashed and dies the first time it is redeemed, so a
+ * copied link stops working as soon as it has been opened once.
+ */
+router.post('/launch', requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    pruneLaunchCodes(db);
+
+    const now = Date.now();
+    const code = crypto.randomBytes(32).toString('base64url');
+    const record = {
+      id: crypto.randomUUID(),
+      userId: req.user.id,
+      username: req.user.username,
+      scope: req.scope,
+      hash: codeHash(code),
+      label: String(req.body?.label || '').trim().slice(0, 60),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + LAUNCH_CODE_TTL_MS).toISOString(),
+      usedAt: null,
+    };
+
+    db.launchCodes.push(record);
+    await persistLaunchCode(record);
+
+    res.status(201).json({
+      code,
+      expiresAt: record.expiresAt,
+      scope: record.scope,
+      username: req.user.username,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/auth/launch/redeem — exchange a one-time code for a session. */
+router.post('/launch/redeem', async (req, res, next) => {
+  try {
+    const code = String(req.body?.code || '').trim();
+    if (!code) return res.status(400).json({ error: 'A launch code is required.' });
+
+    const db = getDb();
+    const record = db.launchCodes.find((entry) => entry.hash === codeHash(code));
+    if (!record || record.revokedAt) {
+      return res.status(401).json({ error: 'This launch link is not valid.', code: 'launch-invalid' });
+    }
+    if (record.usedAt) {
+      return res.status(401).json({
+        error: 'This launch link has already been used. Create a new one.',
+        code: 'launch-used',
+      });
+    }
+    if (new Date(record.expiresAt).getTime() < Date.now()) {
+      return res.status(401).json({
+        error: 'This launch link has expired. Create a new one.',
+        code: 'launch-expired',
+      });
+    }
+
+    const scope = requestScope(req);
+    if (record.scope !== scope) {
+      return res.status(403).json({
+        error: 'This launch link belongs to the other workspace.',
+        code: 'wrong-workspace',
+      });
+    }
+
+    const user = findUserById(record.userId);
+    if (!user) {
+      return res.status(401).json({ error: 'This launch link is not valid.', code: 'launch-invalid' });
+    }
+    if (userScope(user) !== scope) {
+      return res.status(403).json({
+        error: wrongWorkspaceMessage(userScope(user)),
+        code: 'wrong-workspace',
+        scope: userScope(user),
+      });
+    }
+
+    record.usedAt = new Date().toISOString();
+    record.usedFrom = String(req.headers['user-agent'] || '').slice(0, 120);
+    await persistLaunchCode(record);
+
+    res.json({ token: signToken(user), user: publicUser(user), scope });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/auth/launch/revoke — burn every unused launch code for this account. */
+router.post('/launch/revoke', requireAuth, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const mine = db.launchCodes.filter((entry) => entry.userId === req.user.id && !entry.usedAt);
+    const now = new Date().toISOString();
+    for (const entry of mine) {
+      entry.revokedAt = now;
+      await persistLaunchCode(entry);
+    }
+    res.json({ revoked: mine.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/auth/sessions/revoke-all — sign out every device and invalidate
+ * every outstanding launch link, without touching SESSION_SECRET.
+ */
+router.post('/sessions/revoke-all', requireAuth, async (req, res, next) => {
+  try {
+    const user = req.user;
+    user.sessionVersion = (user.sessionVersion || 0) + 1;
+    user.sessionsRevokedAt = new Date().toISOString();
+    await persistUser(user);
+
+    const db = getDb();
+    const codes = db.launchCodes.filter((entry) => entry.userId === user.id && !entry.usedAt);
+    const now = new Date().toISOString();
+    for (const entry of codes) {
+      entry.revokedAt = now;
+      await persistLaunchCode(entry);
+    }
+
+    res.json({
+      ok: true,
+      sessionVersion: user.sessionVersion,
+      launchCodesRevoked: codes.length,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

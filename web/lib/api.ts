@@ -10,17 +10,18 @@ export const API_URL = (
 const TOKEN_KEY = 'relay.token';
 
 /**
- * A launcher shortcut can carry a long-lived session token in the URL fragment,
- * e.g. `https://site/chat#relay-token=…`. The fragment never reaches the server
- * or a referrer, and it is stripped from the address bar as soon as it is read,
- * so a double-click shortcut lands straight in the signed-in workspace.
+ * A launcher shortcut carries a single-use code in the URL fragment, e.g.
+ * `https://site/chat#relay-code=…`. The fragment never reaches the server or a
+ * referrer, it is stripped from the address bar immediately, and the code is
+ * exchanged for a normal session. A copied shortcut stops working after the
+ * first use.
  */
-const LAUNCHER_PREFIX = '#relay-token=';
+const LAUNCHER_CODE_PREFIX = '#relay-code=';
 
 /** Drop the launcher fragment from the address bar (never leaves the page). */
 function scrubLauncherHash(): void {
   try {
-    if (!window.location.hash.startsWith(LAUNCHER_PREFIX)) return;
+    if (!window.location.hash.startsWith(LAUNCHER_CODE_PREFIX)) return;
     window.history.replaceState(
       null,
       '',
@@ -31,29 +32,12 @@ function scrubLauncherHash(): void {
   }
 }
 
-export function consumeLauncherToken(): boolean {
-  if (typeof window === 'undefined') return false;
-  const { hash } = window.location;
-  if (!hash.startsWith(LAUNCHER_PREFIX)) return false;
-
-  let token = '';
-  try {
-    token = decodeURIComponent(hash.slice(LAUNCHER_PREFIX.length)).trim();
-  } catch {
-    token = '';
-  }
-
-  if (token) writeToken(token);
-  scrubLauncherHash();
-  return Boolean(token);
-}
-
-if (typeof window !== 'undefined' && consumeLauncherToken()) {
-  /**
-   * Next.js re-applies the URL it rendered with once hydration finishes, which
-   * puts the fragment back. Scrub again after it settles so the token never
-   * lingers in the address bar or in history.
-   */
+/**
+ * Next.js re-applies the URL it rendered with once hydration finishes, which
+ * puts the fragment back. Scrub again after it settles so the code never
+ * lingers in the address bar or in history.
+ */
+function scheduleLauncherScrub(): void {
   for (const delay of [0, 60, 250, 1000]) {
     window.setTimeout(scrubLauncherHash, delay);
   }
@@ -209,4 +193,67 @@ export function uploadAttachment(
 
     xhr.send(form);
   });
+}
+
+/** Reads `exp` out of a session token without verifying it (display logic only). */
+export function tokenExpiresAt(token: string | null): number {
+  if (!token) return 0;
+  try {
+    const body = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(body));
+    return typeof claims.exp === 'number' ? claims.exp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Exchange a launcher code for a session. Never throws — the sign-in screen explains failures. */
+async function redeemLauncherCode(code: string): Promise<void> {
+  try {
+    const response = await request<{ token?: string }>('/api/auth/launch/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+    if (response?.token) writeToken(response.token);
+  } catch {
+    /* the sign-in screen explains what happened */
+  }
+}
+
+/**
+ * Resolves once a launcher code (when the URL carried one) has been exchanged.
+ * AuthProvider waits for this before reading the stored session, so the app
+ * never flashes the sign-in screen on the way in.
+ */
+export const launcherReady: Promise<void> =
+  typeof window === 'undefined'
+    ? Promise.resolve()
+    : (() => {
+        const { hash } = window.location;
+        if (!hash.startsWith(LAUNCHER_CODE_PREFIX)) return Promise.resolve();
+
+        let code = '';
+        try {
+          code = decodeURIComponent(hash.slice(LAUNCHER_CODE_PREFIX.length)).trim();
+        } catch {
+          code = '';
+        }
+
+        scrubLauncherHash();
+        scheduleLauncherScrub();
+        return code ? redeemLauncherCode(code) : Promise.resolve();
+      })();
+
+/** Slides the session forward; returns the fresh token, or null if it could not renew. */
+export async function refreshSession(): Promise<string | null> {
+  try {
+    const response = await request<{ token?: string }>('/api/auth/refresh', { method: 'POST' });
+    if (response?.token) {
+      writeToken(response.token);
+      return response.token;
+    }
+  } catch {
+    /* keep the current session until it actually expires */
+  }
+  return null;
 }

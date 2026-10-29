@@ -16,7 +16,19 @@ let lastFirestoreError = null;
  */
 const SEED_DEMO = (process.env.SEED_DEMO || 'true').trim().toLowerCase() !== 'false';
 
-const emptyState = () => ({ version: 2, users: [], conversations: [], messages: [] });
+const emptyState = () => ({
+  version: 3,
+  users: [],
+  conversations: [],
+  messages: [],
+  launchCodes: [],
+});
+
+/** Older snapshots predate launch codes; keep them loadable. */
+function normalizeState(next) {
+  if (!Array.isArray(next.launchCodes)) next.launchCodes = [];
+  return next;
+}
 
 function validShape(candidate) {
   return (
@@ -38,9 +50,9 @@ function loadLocal() {
   try {
     const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
     if (!validShape(parsed)) throw new Error('Invalid database shape');
-    state = parsed;
+    state = normalizeState(parsed);
   } catch {
-    state = SEED_DEMO ? seedDatabase() : emptyState();
+    state = normalizeState(SEED_DEMO ? seedDatabase() : emptyState());
     writeLocalSnapshot();
   }
   backend = 'json';
@@ -54,7 +66,7 @@ async function writeAllToFirestore(data) {
   const firestore = getFirestoreDb();
   if (!firestore) return;
 
-  const collections = ['users', 'conversations', 'messages'];
+  const collections = ['users', 'conversations', 'messages', 'launch_codes'];
   let batch = firestore.batch();
   let pending = 0;
 
@@ -78,21 +90,23 @@ async function loadFromFirestore() {
   const firestore = getFirestoreDb();
   if (!firestore) throw new Error('Firestore is not configured');
 
-  const [users, conversations, messages] = await Promise.all([
+  const [users, conversations, messages, launchCodes] = await Promise.all([
     firestore.collection('users').get(),
     firestore.collection('conversations').get(),
     firestore.collection('messages').get(),
+    firestore.collection('launch_codes').get(),
   ]);
 
   const parsed = {
-    version: 2,
+    version: 3,
     users: fromSnapshot(users),
     conversations: fromSnapshot(conversations),
     messages: fromSnapshot(messages),
+    launchCodes: fromSnapshot(launchCodes),
   };
 
   if (parsed.users.length === 0 && SEED_DEMO) {
-    const seeded = seedDatabase();
+    const seeded = normalizeState(seedDatabase());
     await writeAllToFirestore(seeded);
     state = seeded;
     backend = 'firestore';
@@ -101,7 +115,7 @@ async function loadFromFirestore() {
   }
 
   if (!validShape(parsed)) throw new Error('Firestore returned an invalid document shape');
-  state = parsed;
+  state = normalizeState(parsed);
   backend = 'firestore';
 }
 
@@ -172,6 +186,32 @@ export async function persistMessage(message) {
   await writeDoc('messages', message);
 }
 
+/**
+ * Launch codes are single-use sign-in links. Only the SHA-256 hash is stored, so
+ * a database leak does not hand out working links.
+ */
+export async function persistLaunchCode(record) {
+  saveDb();
+  await writeDoc('launch_codes', record);
+}
+
+export async function deleteLaunchCode(id) {
+  const db = getDb();
+  db.launchCodes = db.launchCodes.filter((record) => record.id !== id);
+  saveDb();
+
+  const firestore = getFirestoreDb();
+  if (!firestore) return;
+
+  try {
+    await firestore.collection('launch_codes').doc(id).delete();
+    lastFirestoreError = null;
+  } catch (error) {
+    lastFirestoreError = error;
+    console.warn(`[db] Firestore delete failed for launch_codes/${id}: ${error.message}`);
+  }
+}
+
 export async function deleteMessagesByIds(ids) {
   if (!ids?.length) return;
   saveDb();
@@ -199,7 +239,7 @@ export function dbStatus() {
 }
 
 export function resetDb() {
-  state = seedDatabase();
+  state = normalizeState(seedDatabase());
   writeLocalSnapshot();
   return state;
 }

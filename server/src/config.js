@@ -70,7 +70,14 @@ export const CLIENT_ORIGINS = Array.from(
   ]),
 );
 
-export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+/**
+ * Sessions are short-lived and slide forward while the app is used, so a token
+ * stolen from a browser goes stale instead of living for a year. A launcher
+ * link never carries a session token — only a single-use code.
+ */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const SESSION_REFRESH_WINDOW_MS = 20 * 24 * 60 * 60 * 1000; // renew in the last 10 days
+export const LAUNCH_CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days, single use
 export const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB
 
 /**

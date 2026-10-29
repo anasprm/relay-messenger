@@ -1,18 +1,17 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Mints a long-lived sign-in link for the Relay web app.
+ * Mints a single-use Relay sign-in link for a shortcut or a phone.
  *
- * The link carries a session token in the URL fragment. Opening it signs the
- * account in, stores the token, and strips the fragment from the address bar.
- * Handy for desktop shortcuts and phone home-screen icons.
+ *   node server/scripts/make-launcher-link.mjs --username anas --days 7
  *
- *   node server/scripts/make-launcher-link.mjs --username anas --days 365
+ * How it works: the script signs in normally, asks the API for a one-time
+ * launch code, and puts that code in the URL fragment. The code is stored
+ * hashed on the server, expires (7 days by default) and dies the first time it
+ * is redeemed — so a copied shortcut is worthless after the first use.
  *
- * The password is asked for at runtime unless --password is given. SESSION_SECRET
- * must match the deployed API (Render), otherwise the link will be rejected.
+ * It no longer needs SESSION_SECRET, and it can revoke every older unused link.
  */
 
 const args = process.argv.slice(2);
@@ -20,32 +19,24 @@ function arg(name, fallback = '') {
   const index = args.indexOf(`--${name}`);
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 }
+function flag(name) {
+  return args.includes(`--${name}`);
+}
 
 const username = arg('username');
 const password = arg('password');
-const days = Math.min(Math.max(Number(arg('days', '365')) || 365, 1), 3650);
+const days = Math.min(Math.max(Number(arg('days', '7')) || 7, 1), 30);
 const site = arg('site', 'private');
 const apiUrl = arg('api', 'https://relay-api-amr9.onrender.com').replace(/\/$/, '');
 const appUrl = arg('app', 'https://valiyakath.vercel.app').replace(/\/$/, '');
 const out = arg('out', '');
+const keepOld = flag('keep-old');
 
 if (!username) {
-  console.error('Usage: node server/scripts/make-launcher-link.mjs --username <name> [--days 365] [--out file]');
+  console.error(
+    'Usage: node server/scripts/make-launcher-link.mjs --username <name> [--days 7] [--out file] [--keep-old]',
+  );
   process.exit(1);
-}
-
-function loadSecret() {
-  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET.trim();
-  const envFile = path.join(process.cwd(), 'server', '.env');
-  if (fs.existsSync(envFile)) {
-    for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
-      const match = /^\s*SESSION_SECRET\s*=\s*(.+)\s*$/.exec(line);
-      if (match) return match[1].trim();
-    }
-  }
-  const secretFile = path.join(process.cwd(), 'server', 'data', '.secret');
-  if (fs.existsSync(secretFile)) return fs.readFileSync(secretFile, 'utf8').trim();
-  return '';
 }
 
 function prompt(question) {
@@ -56,51 +47,55 @@ function prompt(question) {
   });
 }
 
-const secret = loadSecret();
-if (!secret) {
-  console.error(
-    'SESSION_SECRET is not available. Set it in the environment or in server/.env.\n' +
-      'It must be the same value the Render service uses, or the link will not verify.',
-  );
-  process.exit(1);
-}
-
 const loginPassword = password || (await prompt(`Password for ${username}: `));
 if (!loginPassword) {
   console.error('A password is required to confirm the account.');
   process.exit(1);
 }
 
-const response = await fetch(`${apiUrl}/api/auth/login`, {
+const headers = { 'Content-Type': 'application/json', 'X-Relay-Site': site };
+
+const loginResponse = await fetch(`${apiUrl}/api/auth/login`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-Relay-Site': site },
+  headers,
   body: JSON.stringify({ username, password: loginPassword }),
 });
-
-const payload = await response.json().catch(() => null);
-if (!response.ok || !payload?.token) {
-  console.error(`Sign-in failed (${response.status}): ${payload?.error || 'unknown error'}`);
+const login = await loginResponse.json().catch(() => null);
+if (!loginResponse.ok || !login?.token) {
+  console.error(`Sign-in failed (${loginResponse.status}): ${login?.error || 'unknown error'}`);
   process.exit(1);
 }
 
-const [body] = payload.token.split('.');
-const claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-const exp = Date.now() + days * 24 * 60 * 60 * 1000;
+const authHeaders = { ...headers, Authorization: `Bearer ${login.token}` };
 
-const nextBody = Buffer.from(
-  JSON.stringify({ sub: claims.sub, username: claims.username, exp }),
-).toString('base64url');
-const signature = crypto
-  .createHmac('sha256', secret)
-  .update(nextBody)
-  .digest('base64url');
-const token = `${nextBody}.${signature}`;
+if (!keepOld) {
+  const revoked = await fetch(`${apiUrl}/api/auth/launch/revoke`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: '{}',
+  })
+    .then((response) => response.json().catch(() => null))
+    .catch(() => null);
+  if (revoked?.revoked) console.log(`Revoked ${revoked.revoked} older unused link(s).`);
+}
 
-const url = `${appUrl}/chat#relay-token=${encodeURIComponent(token)}`;
-const expires = new Date(exp).toISOString();
+const created = await fetch(`${apiUrl}/api/auth/launch`, {
+  method: 'POST',
+  headers: authHeaders,
+  body: JSON.stringify({ label: `launcher ${new Date().toISOString().slice(0, 10)}` }),
+});
 
-console.log(`Account:  ${payload.user?.displayName || username} (@${username}, ${site})`);
-console.log(`Expires:  ${expires} (${days} days)`);
+const payload = await created.json().catch(() => null);
+if (!created.ok || !payload?.code) {
+  console.error(`Could not create a launch code (${created.status}): ${payload?.error || ''}`);
+  process.exit(1);
+}
+
+const url = `${appUrl}/chat#relay-code=${encodeURIComponent(payload.code)}`;
+const expires = new Date(payload.expiresAt).toISOString();
+
+console.log(`Account:  ${login.user?.displayName || username} (@${username}, ${site})`);
+console.log(`Expires:  ${expires} (single use)`);
 console.log(`Link:     ${url}`);
 
 if (out) {
