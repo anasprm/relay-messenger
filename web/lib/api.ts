@@ -9,6 +9,43 @@ export const API_URL = (
 
 const TOKEN_KEY = 'relay.token';
 
+/**
+ * A launcher shortcut can carry a long-lived session token in the URL fragment,
+ * e.g. `https://site/chat#relay-token=…`. The fragment never reaches the server
+ * or a referrer, and it is stripped from the address bar as soon as it is read,
+ * so a double-click shortcut lands straight in the signed-in workspace.
+ */
+const LAUNCHER_PREFIX = '#relay-token=';
+
+export function consumeLauncherToken(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { hash } = window.location;
+  if (!hash.startsWith(LAUNCHER_PREFIX)) return false;
+
+  let token = '';
+  try {
+    token = decodeURIComponent(hash.slice(LAUNCHER_PREFIX.length)).trim();
+  } catch {
+    token = '';
+  }
+
+  if (token) writeToken(token);
+
+  try {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  } catch {
+    /* history is optional */
+  }
+
+  return Boolean(token);
+}
+
+if (typeof window !== 'undefined') consumeLauncherToken();
+
 export class ApiError extends Error {
   status: number;
 
