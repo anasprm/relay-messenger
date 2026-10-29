@@ -27,6 +27,7 @@ import { conversationName, isGroupConversation } from '@/lib/conversations';
 import { errorMessage, useAuth } from '@/lib/AuthProvider';
 import { readAllDrafts } from '@/lib/drafts';
 import { favoritesKey, pinnedKey, readIdSet, writeIdSet } from '@/lib/localSets';
+import { installRingtoneUnlock, stopRingtone } from '@/lib/ringtones';
 import { createSocket } from '@/lib/socket';
 import { isPrivateSite } from '@/lib/site';
 import { useToast } from '@/lib/ToastProvider';
@@ -249,6 +250,15 @@ export function ChatShell() {
     };
   }, [toast, token, user?.id]);
 
+  /* Ringtones need one user gesture before a browser will let them play. */
+  useEffect(() => {
+    const removeUnlock = installRingtoneUnlock();
+    return () => {
+      removeUnlock();
+      stopRingtone();
+    };
+  }, []);
+
   /* Realtime wiring. */
   useEffect(() => {
     if (!token || !user) return;
@@ -257,10 +267,24 @@ export function ChatShell() {
     socketRef.current = client;
     setSocket(client);
 
+    /** Tells the API which tab the person is actually looking at, so a call
+     * rings here instead of in a forgotten background tab. */
+    const announceActive = () => {
+      if (document.visibilityState !== 'visible') return;
+      client.emit('presence:active');
+    };
+
     const onConnect = () => {
       setConnected(true);
+      announceActive();
       void refreshConversations();
     };
+
+    const onFocus = () => announceActive();
+    const onVisibilityChange = () => announceActive();
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     const onDisconnect = () => setConnected(false);
 
@@ -463,6 +487,8 @@ export function ChatShell() {
     client.on('conversation:removed', onConversationRemoved);
 
     return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       client.off('connect', onConnect);
       client.off('disconnect', onDisconnect);
       client.off('connect_error', onConnectError);

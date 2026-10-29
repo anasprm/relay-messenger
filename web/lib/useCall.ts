@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
+import { playConnectedTone, startRingtone, stopRingtone } from './ringtones';
 import type { Conversation, User } from './types';
 
 export type CallKind = 'audio' | 'video';
 export type CallStatus = 'idle' | 'outgoing' | 'incoming' | 'connecting' | 'active';
+
+/** A call that is never answered is cancelled after this long. */
+const CALL_RING_TIMEOUT_MS = 45_000;
 
 export interface CallState {
   status: CallStatus;
@@ -177,6 +181,8 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const incomingRef = useRef<IncomingCall | null>(null);
+  /** Guards against applying the same answer twice (call:answer and the legacy signal). */
+  const applyingAnswerRef = useRef(false);
   const onErrorRef = useRef(onError);
   const onInfoRef = useRef(onInfo);
 
@@ -185,15 +191,16 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     onInfoRef.current = onInfo;
   }, [onError, onInfo]);
 
+  // Compute from the ref instead of inside setState: guards such as "already on
+  // a call" must see the new state immediately, before React re-renders.
   const updateCall = useCallback((updater: (previous: CallState) => CallState) => {
-    setCall((previous) => {
-      const next = updater(previous);
-      callRef.current = next;
-      return next;
-    });
+    const next = updater(callRef.current);
+    callRef.current = next;
+    setCall(next);
   }, []);
 
   const cleanup = useCallback(() => {
+    stopRingtone();
     pcRef.current?.getSenders().forEach((sender) => {
       try {
         sender.track?.stop();
@@ -208,6 +215,7 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     localStreamRef.current = null;
     pendingIceRef.current = [];
     incomingRef.current = null;
+    applyingAnswerRef.current = false;
 
     setLocalStream(null);
     setRemoteStream(null);
@@ -247,6 +255,43 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     [cleanup, socket],
   );
 
+  /**
+   * Applies the callee's answer exactly once. The answer arrives on both
+   * `call:answer` and (for compatibility with older relays) `call:signal`; a
+   * second `setRemoteDescription` while the first is still running throws and
+   * would tear down a call that is actually connecting.
+   */
+  const applyRemoteAnswer = useCallback(
+    async (sdp: RTCSessionDescriptionInit | null) => {
+      const pc = pcRef.current;
+      if (!pc || !sdp) return;
+      if (applyingAnswerRef.current || pc.remoteDescription) return;
+      if (pc.signalingState !== 'have-local-offer') return;
+
+      applyingAnswerRef.current = true;
+      try {
+        await pc.setRemoteDescription(sdp);
+        for (const candidate of pendingIceRef.current) {
+          await pc.addIceCandidate(candidate).catch(() => undefined);
+        }
+        pendingIceRef.current = [];
+        updateCall((previous) => ({
+          ...previous,
+          status: 'active',
+          startedAt: previous.startedAt || Date.now(),
+        }));
+      } catch {
+        if (pcRef.current === pc) {
+          onErrorRef.current?.('The call could not be connected.');
+          cleanup();
+        }
+      } finally {
+        applyingAnswerRef.current = false;
+      }
+    },
+    [cleanup, updateCall],
+  );
+
   /** Caller: ring the peer and send the SDP offer. */
   const start = useCallback(
     async (conversation: Conversation, kind: CallKind) => {
@@ -277,6 +322,11 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
 
       try {
         const stream = await acquireMedia(kind, (message) => onInfoRef.current?.(message));
+        const latest = callRef.current;
+        if (latest.status !== 'outgoing' || latest.conversationId !== conversation.id) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
         updateCall((previous) => ({
@@ -318,6 +368,10 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
 
     try {
       const stream = await acquireMedia(incoming.kind, (message) => onInfoRef.current?.(message));
+      if (callRef.current.status !== 'connecting' || incomingRef.current !== incoming) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       localStreamRef.current = stream;
       setLocalStream(stream);
 
@@ -390,6 +444,18 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
 
   const end = useCallback(() => {
     const current = callRef.current;
+    if (current.status === 'incoming') {
+      const incoming = incomingRef.current;
+      if (incoming && socket) {
+        socket.emit('call:decline', {
+          to: incoming.from.id,
+          conversationId: incoming.conversationId,
+          reason: 'declined',
+        });
+      }
+      cleanup();
+      return;
+    }
     if (current.peer && current.conversationId && socket) {
       socket.emit('call:end', {
         to: current.peer.id,
@@ -423,6 +489,65 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     [cleanup],
   );
 
+  /* Ringtone lifecycle: ring while calling or being called, stop the moment the
+   * call is answered, and play a short confirmation once media connects. */
+  useEffect(() => {
+    if (call.status === 'incoming') {
+      startRingtone('incoming');
+    } else if (call.status === 'outgoing') {
+      startRingtone('outgoing');
+    } else if (call.status === 'active') {
+      playConnectedTone();
+    } else {
+      stopRingtone();
+    }
+  }, [call.status]);
+
+  /* Missed-call handling: nobody should be left ringing forever. */
+  useEffect(() => {
+    const { status } = call;
+    if (status !== 'outgoing' && status !== 'incoming' && status !== 'connecting') return;
+
+    const timer = window.setTimeout(() => {
+      const current = callRef.current;
+      if (current.status === 'idle') return;
+
+      if (current.status === 'incoming') {
+        const incoming = incomingRef.current;
+        if (incoming && socket) {
+          socket.emit('call:decline', {
+            to: incoming.from.id,
+            conversationId: incoming.conversationId,
+            reason: 'missed',
+          });
+        }
+        onInfoRef.current?.(
+          current.peer?.displayName
+            ? `Missed call from ${current.peer.displayName}.`
+            : 'Missed call.',
+        );
+        cleanup();
+        return;
+      }
+
+      if (current.peer && current.conversationId && socket) {
+        socket.emit('call:end', {
+          to: current.peer.id,
+          conversationId: current.conversationId,
+          reason: current.status === 'connecting' ? 'failed' : 'missed',
+        });
+      }
+      onInfoRef.current?.(
+        current.status === 'connecting'
+          ? 'The call could not be connected.'
+          : 'No answer. The call was cancelled.',
+      );
+      cleanup();
+    }, CALL_RING_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [call.status, cleanup, socket]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -451,8 +576,9 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
       }));
     };
 
-    const onAccepted = () => {
+    const onAccepted = (payload: { from?: User }) => {
       if (callRef.current.status !== 'outgoing') return;
+      if (payload?.from?.id && payload.from.id !== callRef.current.peer?.id) return;
       updateCall((previous) => ({ ...previous, status: 'connecting' }));
     };
 
@@ -461,26 +587,10 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
       conversationId: string;
       sdp: RTCSessionDescriptionInit;
     }) => {
-      const pc = pcRef.current;
-      if (!pc || !payload?.sdp) return;
+      if (!payload?.sdp) return;
       if (payload.conversationId !== callRef.current.conversationId) return;
-      if (pc.remoteDescription) return;
-
-      try {
-        await pc.setRemoteDescription(payload.sdp);
-        for (const candidate of pendingIceRef.current) {
-          await pc.addIceCandidate(candidate).catch(() => undefined);
-        }
-        pendingIceRef.current = [];
-        updateCall((previous) => ({
-          ...previous,
-          status: 'active',
-          startedAt: previous.startedAt || Date.now(),
-        }));
-      } catch {
-        onErrorRef.current?.('The call could not be connected.');
-        cleanup();
-      }
+      if (payload.from !== callRef.current.peer?.id) return;
+      await applyRemoteAnswer(payload.sdp);
     };
 
     const onSignal = async (payload: {
@@ -492,27 +602,12 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     }) => {
       if (!payload?.data) return;
       if (payload.conversationId !== callRef.current.conversationId) return;
+      if (payload.from !== callRef.current.peer?.id) return;
 
       const pc = pcRef.current;
 
       if (payload.data.type === 'sdp') {
-        const sdp = payload.data.sdp;
-        if (!pc || !sdp || pc.remoteDescription) return;
-        try {
-          await pc.setRemoteDescription(sdp);
-          for (const candidate of pendingIceRef.current) {
-            await pc.addIceCandidate(candidate).catch(() => undefined);
-          }
-          pendingIceRef.current = [];
-          updateCall((previous) => ({
-            ...previous,
-            status: 'active',
-            startedAt: previous.startedAt || Date.now(),
-          }));
-        } catch {
-          onErrorRef.current?.('The call could not be connected.');
-          cleanup();
-        }
+        await applyRemoteAnswer(payload.data.sdp || null);
         return;
       }
 
@@ -538,8 +633,13 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     };
 
     const onDeclined = (payload: { reason?: string }) => {
-      if (typeof payload?.reason === 'string' && payload.reason === 'busy') {
+      if (callRef.current.status === 'idle') return;
+      if (payload?.reason === 'busy') {
         hangUpWithNotice('That person is already on another call.');
+      } else if (payload?.reason === 'missed') {
+        hangUpWithNotice('No answer.');
+      } else if (payload?.reason === 'unavailable') {
+        hangUpWithNotice('The call could not be answered.');
       } else {
         hangUpWithNotice('The call was declined.');
       }
@@ -549,9 +649,21 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
       hangUpWithNotice(payload?.reason || 'This person is offline right now.');
     };
 
-    const onEnded = () => {
+    const onEnded = (payload: { reason?: string }) => {
       if (callRef.current.status === 'idle') return;
-      hangUpWithNotice('The call ended.');
+      if (payload?.reason === 'missed') {
+        hangUpWithNotice('Missed call.');
+      } else if (payload?.reason === 'offline' || payload?.reason === 'disconnected') {
+        hangUpWithNotice('The call ended because they went offline.');
+      } else {
+        hangUpWithNotice('The call ended.');
+      }
+    };
+
+    const onDisconnect = (reason: string) => {
+      if (reason === 'io client disconnect') return;
+      if (callRef.current.status === 'idle') return;
+      hangUpWithNotice('The call ended because the connection dropped.');
     };
 
     socket.on('call:incoming', onIncoming);
@@ -561,6 +673,7 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
     socket.on('call:declined', onDeclined);
     socket.on('call:unavailable', onUnavailable);
     socket.on('call:ended', onEnded);
+    socket.on('disconnect', onDisconnect);
 
     return () => {
       socket.off('call:incoming', onIncoming);
@@ -570,11 +683,13 @@ export function useCall({ socket, onError, onInfo, busyRef }: UseCallOptions) {
       socket.off('call:declined', onDeclined);
       socket.off('call:unavailable', onUnavailable);
       socket.off('call:ended', onEnded);
+      socket.off('disconnect', onDisconnect);
     };
-  }, [cleanup, hangUpWithNotice, socket, updateCall, busyRef]);
+  }, [applyRemoteAnswer, cleanup, hangUpWithNotice, socket, updateCall, busyRef]);
 
   useEffect(() => {
     return () => {
+      stopRingtone();
       pcRef.current?.close();
       pcRef.current = null;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());

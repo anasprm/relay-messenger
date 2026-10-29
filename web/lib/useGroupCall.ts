@@ -2,10 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
+import { playConnectedTone, startRingtone, stopRingtone } from './ringtones';
 import type { Conversation, User } from './types';
 import { acquireMedia, ICE_SERVERS, mediaErrorMessage, type CallKind } from './useCall';
 
 export type GroupCallStatus = 'idle' | 'ringing' | 'joining' | 'active';
+
+/** An unanswered group ring stops after this long. */
+const GROUP_RING_TIMEOUT_MS = 45_000;
+/** A caller waiting alone for someone to join gives up after this long. */
+const GROUP_ALONE_TIMEOUT_MS = 60_000;
 
 export interface GroupCallPeer extends User {
   muted: boolean;
@@ -111,6 +117,9 @@ export function useGroupCall({
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const roomRef = useRef<{ conversationId: string; callId: string | null } | null>(null);
   const ringingRef = useRef<RingingPayload | null>(null);
+  const roleRef = useRef<'caller' | 'callee' | null>(null);
+  const connectedToneRef = useRef(false);
+  const aloneTimerRef = useRef<number | null>(null);
   const meRef = useRef<User | null>(me);
   const onErrorRef = useRef(onError);
   const onInfoRef = useRef(onInfo);
@@ -153,6 +162,11 @@ export function useGroupCall({
 
   const cleanup = useCallback(
     (notice?: string) => {
+      stopRingtone();
+      if (aloneTimerRef.current !== null) {
+        window.clearTimeout(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+      }
       for (const peerId of [...peersRef.current.keys()]) closePeer(peerId);
       peersRef.current.clear();
       pendingIceRef.current.clear();
@@ -164,6 +178,8 @@ export function useGroupCall({
 
       ringingRef.current = null;
       roomRef.current = null;
+      roleRef.current = null;
+      connectedToneRef.current = false;
       stateRef.current = IDLE;
       setCall(IDLE);
 
@@ -263,6 +279,8 @@ export function useGroupCall({
         kind,
         cameraOn: kind === 'video',
       };
+      roleRef.current = 'caller';
+      connectedToneRef.current = false;
       updateCall(() => next);
       roomRef.current = { conversationId: conversation.id, callId: null };
 
@@ -314,6 +332,8 @@ export function useGroupCall({
       kind,
       cameraOn: kind === 'video',
     };
+    roleRef.current = 'callee';
+    connectedToneRef.current = false;
     updateCall(() => next);
     roomRef.current = { conversationId: ringing.conversationId, callId: ringing.callId };
     onOpenRef.current?.(ringing.conversationId);
@@ -399,6 +419,93 @@ export function useGroupCall({
     }
   }, [socket, updateCall]);
 
+  /* Ringtone lifecycle: ring for an invite, play ringback while the caller
+   * waits for the first person, and confirm once somebody connects. */
+  useEffect(() => {
+    const { status } = call;
+
+    if (status === 'ringing') {
+      startRingtone('incoming');
+      return;
+    }
+
+    if (status === 'joining') {
+      if (roleRef.current === 'caller') startRingtone('outgoing');
+      else stopRingtone();
+      return;
+    }
+
+    if (status === 'active') {
+      if (call.peers.length > 0) {
+        if (!connectedToneRef.current) {
+          connectedToneRef.current = true;
+          playConnectedTone();
+        } else {
+          stopRingtone();
+        }
+        return;
+      }
+      if (roleRef.current === 'caller') startRingtone('outgoing');
+      else stopRingtone();
+      return;
+    }
+
+    stopRingtone();
+  }, [call.status, call.peers.length]);
+
+  /* A group ring must not ring forever. */
+  useEffect(() => {
+    if (call.status !== 'ringing') return;
+
+    const timer = window.setTimeout(() => {
+      const current = stateRef.current;
+      if (current.status !== 'ringing') return;
+
+      const ringing = ringingRef.current;
+      if (ringing && socket) {
+        socket.emit('group:call:decline', { conversationId: ringing.conversationId });
+      }
+      onInfoRef.current?.(
+        current.from?.displayName
+          ? `Missed group call from ${current.from.displayName}.`
+          : 'Missed group call.',
+      );
+      cleanup();
+    }, GROUP_RING_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [call.status, cleanup, socket]);
+
+  /* A caller waiting alone (nobody joined yet, or everyone left) ends the call
+   * instead of staying connected to an empty room. */
+  useEffect(() => {
+    const waiting =
+      roleRef.current === 'caller' &&
+      (call.status === 'joining' || (call.status === 'active' && call.peers.length === 0));
+
+    if (!waiting) {
+      if (aloneTimerRef.current !== null) {
+        window.clearTimeout(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (aloneTimerRef.current !== null) return;
+
+    aloneTimerRef.current = window.setTimeout(() => {
+      aloneTimerRef.current = null;
+      const room = roomRef.current;
+      const current = stateRef.current;
+      if (!room || roleRef.current !== 'caller') return;
+      if (current.status === 'idle' || current.peers.length > 0) return;
+
+      if (socket) socket.emit('group:call:leave', { conversationId: room.conversationId });
+      onInfoRef.current?.('Nobody joined, so the group call ended.');
+      cleanup();
+    }, GROUP_ALONE_TIMEOUT_MS);
+  }, [call.status, call.peers.length, cleanup, socket]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -455,6 +562,14 @@ export function useGroupCall({
       if (current.status !== 'active' || current.conversationId !== payload.conversationId) return;
 
       const myId = meRef.current?.id;
+      const joinedId = payload.joined?.id;
+
+      // A member moved to another tab: their old peer connection belongs to a
+      // socket that no longer owns the call, so replace it when they re-offer.
+      if (joinedId && joinedId !== myId && peersRef.current.has(joinedId)) {
+        closePeer(joinedId);
+      }
+
       const peers = (payload.participants || [])
         .filter((participant) => participant.id !== myId)
         .map(toPeer);
@@ -471,6 +586,9 @@ export function useGroupCall({
 
       if (data.type === 'sdp' && data.sdp) {
         if (data.sdp.type === 'offer') {
+          const existing = peersRef.current.get(payload.from);
+          // A fresh offer after a tab move replaces the stale connection.
+          if (existing?.remoteDescription) closePeer(payload.from);
           const pc = ensurePeer(payload.from);
           try {
             await pc.setRemoteDescription(data.sdp);
@@ -564,13 +682,20 @@ export function useGroupCall({
       cleanup(payload?.reason || 'That group call is not available.');
     };
 
-    const onEnded = (payload: { conversationId: string }) => {
+    const onEnded = (payload: { conversationId: string; reason?: string }) => {
       const current = stateRef.current;
       if (current.status === 'idle' || current.conversationId !== payload.conversationId) return;
-      cleanup('The group call ended.');
+      if (payload.reason === 'elsewhere') {
+        cleanup('This call is now in another tab.');
+      } else if (payload.reason === 'removed') {
+        cleanup('You were removed from the group call.');
+      } else {
+        cleanup('The group call ended.');
+      }
     };
 
-    const onDisconnect = () => {
+    const onDisconnect = (reason: string) => {
+      if (reason === 'io client disconnect') return;
       if (stateRef.current.status === 'idle') return;
       cleanup('The group call ended because the connection dropped.');
     };
@@ -611,6 +736,11 @@ export function useGroupCall({
 
   useEffect(() => {
     return () => {
+      stopRingtone();
+      if (aloneTimerRef.current !== null) {
+        window.clearTimeout(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+      }
       for (const pc of peersRef.current.values()) {
         try {
           pc.close();

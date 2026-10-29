@@ -85,6 +85,47 @@ export function broadcastConversationRemoved(io, conversation, userId) {
 
 const groupCallRooms = new Map();
 
+/** One-to-one calls, keyed by conversation, with the socket that owns each end. */
+const directCalls = new Map();
+const DIRECT_CALL_TTL_MS = 2 * 60 * 1000;
+
+function directCallForUser(userId) {
+  for (const [conversationId, entry] of directCalls) {
+    if (entry.callerId === userId || entry.calleeId === userId) {
+      return { conversationId, entry };
+    }
+  }
+  return null;
+}
+
+function groupCallForUser(userId) {
+  for (const room of groupCallRooms.values()) {
+    if (room.participants.has(userId)) return room;
+  }
+  return null;
+}
+
+/** Explains why a person cannot start or receive another call right now. */
+function directCallBusyReason(userId) {
+  const found = directCallForUser(userId);
+  if (!found) return null;
+  const { entry } = found;
+  if (entry.callerId === userId) return 'You are already on a call.';
+  return entry.accepted
+    ? 'You are already on a call.'
+    : 'You have an incoming call. Answer or decline it first.';
+}
+
+/** Drops rings that were never answered, e.g. after a client crash. */
+function clearStaleDirectCalls() {
+  const now = Date.now();
+  for (const [conversationId, entry] of [...directCalls]) {
+    if (!entry.accepted && now - entry.createdAt > DIRECT_CALL_TTL_MS) {
+      directCalls.delete(conversationId);
+    }
+  }
+}
+
 function groupRoomSummary(room) {
   return {
     callId: room.id,
@@ -120,6 +161,59 @@ function groupConversationFor(conversationId, userId, scope) {
   if (conversationScope(conversation) !== scope) return null;
   if (!conversation.participantIds.includes(userId)) return null;
   return conversation;
+}
+
+/**
+ * Adds a person to a group room, or moves their participation to a newer tab.
+ * The old tab is told to close its overlay; the remaining members rebuild the
+ * peer connection when the new tab offers again.
+ */
+function addGroupParticipant(io, room, user, socket) {
+  const existing = room.participants.get(user.id);
+
+  if (existing) {
+    if (existing.socketId === socket.id) {
+      socket.emit('group:call:joined', { ...groupRoomSummary(room), existing: [] });
+      return;
+    }
+
+    io.to(existing.socketId).emit('group:call:ended', {
+      conversationId: room.conversationId,
+      callId: room.id,
+      reason: 'elsewhere',
+    });
+
+    existing.socketId = socket.id;
+    existing.muted = false;
+    existing.cameraOn = room.kind === 'video';
+
+    const existingIds = [...room.participants.keys()].filter((id) => id !== user.id);
+    socket.emit('group:call:joined', { ...groupRoomSummary(room), existing: existingIds });
+    emitToRoom(
+      io,
+      room,
+      'group:call:peer-joined',
+      { ...groupRoomSummary(room), joined: publicUser(user) },
+      user.id,
+    );
+    return;
+  }
+
+  const existingIds = [...room.participants.keys()];
+  room.participants.set(user.id, {
+    socketId: socket.id,
+    muted: false,
+    cameraOn: room.kind === 'video',
+  });
+
+  socket.emit('group:call:joined', { ...groupRoomSummary(room), existing: existingIds });
+  emitToRoom(
+    io,
+    room,
+    'group:call:peer-joined',
+    { ...groupRoomSummary(room), joined: publicUser(user) },
+    user.id,
+  );
 }
 
 function removeFromGroupCall(io, room, userId, reason) {
@@ -204,6 +298,11 @@ export function registerRealtime(io) {
 
     socket.emit('presence:snapshot', { online: onlineInScope });
 
+    // The focused tab claims calls; background tabs stay quiet.
+    socket.on('presence:active', () => {
+      presence.markActiveSocket(user.id, socket.id);
+    });
+
     if (becameOnline) {
       user.lastSeen = new Date().toISOString();
       persistUser(user).catch((error) => {
@@ -246,7 +345,8 @@ export function registerRealtime(io) {
         return;
       }
 
-      if (!presence.isOnline(payload.to)) {
+      const calleeSocketId = presence.activeSocketFor(payload.to);
+      if (!calleeSocketId) {
         socket.emit('call:unavailable', {
           conversationId: conversation.id,
           reason: 'This person is offline right now.',
@@ -254,17 +354,80 @@ export function registerRealtime(io) {
         return;
       }
 
-      io.to(`user:${payload.to}`).emit('call:incoming', {
+      clearStaleDirectCalls();
+
+      const existing = directCalls.get(conversation.id);
+      if (existing && existing.callerSocketId !== socket.id) {
+        socket.emit('call:unavailable', {
+          conversationId: conversation.id,
+          reason: 'There is already a call in this chat.',
+        });
+        return;
+      }
+      if (existing) directCalls.delete(conversation.id);
+
+      const callerBusy = directCallBusyReason(user.id);
+      if (callerBusy) {
+        socket.emit('call:unavailable', { conversationId: conversation.id, reason: callerBusy });
+        return;
+      }
+      if (groupCallForUser(user.id)) {
+        socket.emit('call:unavailable', {
+          conversationId: conversation.id,
+          reason: 'Finish your group call first.',
+        });
+        return;
+      }
+
+      const calleeBusy = directCallBusyReason(payload.to);
+      if (calleeBusy) {
+        socket.emit('call:unavailable', {
+          conversationId: conversation.id,
+          reason:
+            calleeBusy === 'You have an incoming call. Answer or decline it first.'
+              ? 'That person already has an incoming call.'
+              : 'That person is already on another call.',
+        });
+        return;
+      }
+      if (groupCallForUser(payload.to)) {
+        socket.emit('call:unavailable', {
+          conversationId: conversation.id,
+          reason: 'That person is already on a group call.',
+        });
+        return;
+      }
+
+      const kind = payload.kind === 'video' ? 'video' : 'audio';
+      directCalls.set(conversation.id, {
+        conversationId: conversation.id,
+        callerId: user.id,
+        callerSocketId: socket.id,
+        calleeId: payload.to,
+        calleeSocketId,
+        kind,
+        accepted: false,
+        createdAt: Date.now(),
+      });
+
+      io.to(calleeSocketId).emit('call:incoming', {
         from: publicUser(user, findUserById(payload.to)),
         conversationId: conversation.id,
-        kind: payload.kind === 'video' ? 'video' : 'audio',
+        kind,
         sdp: payload.sdp || null,
       });
     });
 
     socket.on('call:accept', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
-      io.to(`user:${payload.to}`).emit('call:accepted', {
+
+      const entry = directCalls.get(payload.conversationId);
+      if (!entry) return;
+      if (entry.callerId !== payload.to || entry.calleeId !== user.id) return;
+      if (entry.calleeSocketId !== socket.id) return;
+
+      entry.accepted = true;
+      io.to(entry.callerSocketId).emit('call:accepted', {
         from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
       });
@@ -274,7 +437,12 @@ export function registerRealtime(io) {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
       if (!payload.sdp) return;
 
-      io.to(`user:${payload.to}`).emit('call:answer', {
+      const entry = directCalls.get(payload.conversationId);
+      if (!entry) return;
+      if (entry.callerId !== payload.to || entry.calleeId !== user.id) return;
+      if (entry.calleeSocketId !== socket.id) return;
+
+      io.to(entry.callerSocketId).emit('call:answer', {
         from: user.id,
         conversationId: payload.conversationId,
         sdp: payload.sdp,
@@ -283,7 +451,14 @@ export function registerRealtime(io) {
 
     socket.on('call:decline', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
-      io.to(`user:${payload.to}`).emit('call:declined', {
+
+      const entry = directCalls.get(payload.conversationId);
+      if (!entry) return;
+      if (entry.callerId !== payload.to || entry.calleeId !== user.id) return;
+      if (entry.calleeSocketId !== socket.id) return;
+
+      directCalls.delete(payload.conversationId);
+      io.to(entry.callerSocketId).emit('call:declined', {
         from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
         reason: payload.reason || 'declined',
@@ -292,6 +467,34 @@ export function registerRealtime(io) {
 
     socket.on('call:signal', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
+
+      const entry = directCalls.get(payload.conversationId);
+      if (entry) {
+        let target = null;
+        if (
+          entry.callerId === user.id &&
+          entry.callerSocketId === socket.id &&
+          entry.calleeId === payload.to
+        ) {
+          target = entry.calleeSocketId;
+        } else if (
+          entry.calleeId === user.id &&
+          entry.calleeSocketId === socket.id &&
+          entry.callerId === payload.to
+        ) {
+          target = entry.callerSocketId;
+        }
+        if (!target) return;
+
+        io.to(target).emit('call:signal', {
+          from: user.id,
+          conversationId: payload.conversationId,
+          data: payload.data || null,
+        });
+        return;
+      }
+
+      // Legacy fallback for a call that began before an API restart.
       io.to(`user:${payload.to}`).emit('call:signal', {
         from: user.id,
         conversationId: payload.conversationId,
@@ -301,6 +504,26 @@ export function registerRealtime(io) {
 
     socket.on('call:end', (payload = {}) => {
       if (!conversationBetween(payload.conversationId, user.id, payload.to, scope)) return;
+
+      const entry = directCalls.get(payload.conversationId);
+      if (entry) {
+        let target = null;
+        if (entry.callerId === user.id && entry.callerSocketId === socket.id) {
+          target = entry.calleeSocketId;
+        } else if (entry.calleeId === user.id && entry.calleeSocketId === socket.id) {
+          target = entry.callerSocketId;
+        }
+        if (!target) return;
+
+        directCalls.delete(payload.conversationId);
+        io.to(target).emit('call:ended', {
+          from: publicUser(user, findUserById(payload.to)),
+          conversationId: payload.conversationId,
+          reason: payload.reason || 'ended',
+        });
+        return;
+      }
+
       io.to(`user:${payload.to}`).emit('call:ended', {
         from: publicUser(user, findUserById(payload.to)),
         conversationId: payload.conversationId,
@@ -324,9 +547,24 @@ export function registerRealtime(io) {
         return;
       }
 
-      if (room && room.participants.has(user.id)) {
-        socket.emit('group:call:joined', groupRoomSummary(room));
-        return;
+      const alreadyHere = !!room?.participants.has(user.id);
+      if (!alreadyHere) {
+        const directReason = directCallBusyReason(user.id);
+        if (directReason) {
+          socket.emit('group:call:unavailable', {
+            conversationId: conversation.id,
+            reason: directReason,
+          });
+          return;
+        }
+        const otherRoom = groupCallForUser(user.id);
+        if (otherRoom && otherRoom.conversationId !== conversation.id) {
+          socket.emit('group:call:unavailable', {
+            conversationId: conversation.id,
+            reason: 'You are already on a group call.',
+          });
+          return;
+        }
       }
 
       const created = !room;
@@ -342,26 +580,17 @@ export function registerRealtime(io) {
         groupCallRooms.set(conversation.id, room);
       }
 
-      const existing = [...room.participants.keys()];
-      room.participants.set(user.id, { muted: false, cameraOn: kind === 'video' });
-
-      socket.emit('group:call:joined', { ...groupRoomSummary(room), existing });
-      emitToRoom(
-        io,
-        room,
-        'group:call:peer-joined',
-        { ...groupRoomSummary(room), joined: publicUser(user) },
-        user.id,
-      );
+      addGroupParticipant(io, room, user, socket);
 
       if (!created) return;
 
-      // Ring every other member who is online right now.
+      // Ring the focused tab of every other member who is online right now.
       for (const memberId of conversation.participantIds) {
         if (memberId === user.id) continue;
-        if (!presence.isOnline(memberId)) continue;
+        const targetSocket = presence.activeSocketFor(memberId);
+        if (!targetSocket) continue;
 
-        io.to(`user:${memberId}`).emit('group:call:ringing', {
+        io.to(targetSocket).emit('group:call:ringing', {
           callId: room.id,
           conversationId: conversation.id,
           title: conversation.title || 'Group chat',
@@ -386,22 +615,26 @@ export function registerRealtime(io) {
         return;
       }
 
-      if (room.participants.has(user.id)) {
-        socket.emit('group:call:joined', { ...groupRoomSummary(room), existing: [] });
-        return;
+      if (!room.participants.has(user.id)) {
+        const directReason = directCallBusyReason(user.id);
+        if (directReason) {
+          socket.emit('group:call:unavailable', {
+            conversationId: conversation.id,
+            reason: directReason,
+          });
+          return;
+        }
+        const otherRoom = groupCallForUser(user.id);
+        if (otherRoom && otherRoom.conversationId !== conversation.id) {
+          socket.emit('group:call:unavailable', {
+            conversationId: conversation.id,
+            reason: 'You are already on a group call.',
+          });
+          return;
+        }
       }
 
-      const existing = [...room.participants.keys()];
-      room.participants.set(user.id, { muted: false, cameraOn: room.kind === 'video' });
-
-      socket.emit('group:call:joined', { ...groupRoomSummary(room), existing });
-      emitToRoom(
-        io,
-        room,
-        'group:call:peer-joined',
-        { ...groupRoomSummary(room), joined: publicUser(user) },
-        user.id,
-      );
+      addGroupParticipant(io, room, user, socket);
     });
 
     socket.on('group:call:decline', (payload = {}) => {
@@ -420,10 +653,15 @@ export function registerRealtime(io) {
     socket.on('group:call:signal', (payload = {}) => {
       const room = groupCallRooms.get(payload.conversationId);
       if (!room) return;
-      if (!room.participants.has(user.id)) return;
-      if (!room.participants.has(payload.to)) return;
 
-      io.to(`user:${payload.to}`).emit('group:call:signal', {
+      // Only the tab that owns this person's participation may signal.
+      const sender = room.participants.get(user.id);
+      if (!sender || sender.socketId !== socket.id) return;
+
+      const target = room.participants.get(payload.to);
+      if (!target) return;
+
+      io.to(target.socketId).emit('group:call:signal', {
         conversationId: room.conversationId,
         callId: room.id,
         from: user.id,
@@ -435,7 +673,7 @@ export function registerRealtime(io) {
       const room = groupCallRooms.get(payload.conversationId);
       if (!room) return;
       const state = room.participants.get(user.id);
-      if (!state) return;
+      if (!state || state.socketId !== socket.id) return;
 
       state.muted = !!payload.muted;
       state.cameraOn = !!payload.cameraOn;
@@ -457,14 +695,38 @@ export function registerRealtime(io) {
     socket.on('group:call:leave', (payload = {}) => {
       const room = groupCallRooms.get(payload.conversationId);
       if (!room) return;
+      const state = room.participants.get(user.id);
+      if (!state || state.socketId !== socket.id) return;
       removeFromGroupCall(io, room, user.id, 'left');
     });
 
     socket.on('disconnect', async () => {
       for (const room of [...groupCallRooms.values()]) {
-        if (room.participants.has(user.id)) {
+        const participant = room.participants.get(user.id);
+        if (participant?.socketId === socket.id) {
           removeFromGroupCall(io, room, user.id, 'disconnected');
         }
+      }
+
+      // Tell the other end of any one-to-one call that this tab went away.
+      for (const [conversationId, entry] of [...directCalls]) {
+        let otherSocketId = null;
+        let otherUserId = null;
+        if (entry.callerSocketId === socket.id) {
+          otherSocketId = entry.calleeSocketId;
+          otherUserId = entry.calleeId;
+        } else if (entry.calleeSocketId === socket.id) {
+          otherSocketId = entry.callerSocketId;
+          otherUserId = entry.callerId;
+        }
+        if (!otherSocketId) continue;
+
+        directCalls.delete(conversationId);
+        io.to(otherSocketId).emit('call:ended', {
+          from: publicUser(user, findUserById(otherUserId)),
+          conversationId,
+          reason: 'offline',
+        });
       }
 
       const wentOffline = presence.removeSocket(user.id, socket.id);
