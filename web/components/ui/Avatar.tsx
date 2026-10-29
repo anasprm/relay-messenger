@@ -1,4 +1,4 @@
-import { Shield } from 'lucide-react';
+import { Shield, Users } from 'lucide-react';
 import { mediaUrl } from '@/lib/api';
 import { cn, initials } from '@/lib/utils';
 import type { Accent, User } from '@/lib/types';
@@ -71,6 +71,38 @@ export function Avatar({ user, size = 'md', online, className, ring }: AvatarPro
           aria-label="Online"
         />
       )}
+    </span>
+  );
+}
+
+interface GroupAvatarProps {
+  size?: AvatarSize;
+  accent?: Accent;
+  label?: string;
+  className?: string;
+}
+
+/** Group threads share one tile with a people glyph, never a single face. */
+export function GroupAvatar({
+  size = 'md',
+  accent = 'emerald',
+  label = 'Group chat',
+  className,
+}: GroupAvatarProps) {
+  const iconSize = size === '2xl' ? 34 : size === 'xl' ? 24 : size === 'lg' ? 17 : 14;
+
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white shadow-sm',
+        ACCENTS[accent] || ACCENTS.emerald,
+        SIZES[size],
+        className,
+      )}
+      aria-hidden="true"
+      title={label}
+    >
+      <Users size={iconSize} />
     </span>
   );
 }

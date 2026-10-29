@@ -1,4 +1,4 @@
-import { findConversation, findUserById, persistUser } from './db.js';
+import { findConversation, findUserById, isGroupConversation, persistUser } from './db.js';
 import { verifyToken } from './auth.js';
 import * as presence from './presence.js';
 import { publicUser, serializeMessage } from './serializers.js';
@@ -67,6 +67,13 @@ export function broadcastConversationRefresh(io, conversation) {
   }
 }
 
+/** Tells one person that a group disappeared from their list (removed or left). */
+export function broadcastConversationRemoved(io, conversation, userId) {
+  io.to(`user:${userId}`).emit('conversation:removed', {
+    conversationId: conversation.id,
+  });
+}
+
 /** Unsend: tells both participants to drop the message immediately. */
 export function broadcastMessageDeleted(io, conversation, messageId) {
   for (const participantId of conversation.participantIds) {
@@ -121,19 +128,34 @@ export function registerRealtime(io) {
     }
 
     socket.on('typing', (payload = {}) => {
-      const conversation = conversationBetween(payload.conversationId, user.id, payload.to, scope);
+      const conversation = findConversation(payload.conversationId);
       if (!conversation) return;
+      if (conversationScope(conversation) !== scope) return;
+      if (!conversation.participantIds.includes(user.id)) return;
 
-      io.to(`user:${payload.to}`).emit('typing:update', {
-        conversationId: conversation.id,
-        userId: user.id,
-        typing: !!payload.typing,
-      });
+      // A group has no single recipient: every other member sees the indicator.
+      for (const participantId of conversation.participantIds) {
+        if (participantId === user.id) continue;
+        io.to(`user:${participantId}`).emit('typing:update', {
+          conversationId: conversation.id,
+          userId: user.id,
+          typing: !!payload.typing,
+        });
+      }
     });
 
     socket.on('call:invite', (payload = {}) => {
       const conversation = conversationBetween(payload.conversationId, user.id, payload.to, scope);
       if (!conversation) return;
+
+      // WebRTC calls are one-to-one; a group must not ring a single member.
+      if (isGroupConversation(conversation)) {
+        socket.emit('call:unavailable', {
+          conversationId: conversation.id,
+          reason: 'Calls are one-to-one, so they are not available in group chats.',
+        });
+        return;
+      }
 
       if (!presence.isOnline(payload.to)) {
         socket.emit('call:unavailable', {

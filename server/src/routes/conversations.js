@@ -3,9 +3,11 @@ import { Router } from 'express';
 import { hashPassword, requireAuth, verifyPassword } from '../auth.js';
 import {
   conversationFor,
+  deleteConversation,
   deleteMessagesByIds,
   findUserByUsername,
   getDb,
+  isGroupConversation,
   lastMessageFor,
   persistConversation,
   persistMessage,
@@ -15,6 +17,7 @@ import { serializeConversation, serializeMessage } from '../serializers.js';
 import { conversationScope } from '../site.js';
 import {
   broadcastConversationRefresh,
+  broadcastConversationRemoved,
   broadcastMessage,
   broadcastModes,
   broadcastPurge,
@@ -108,6 +111,7 @@ router.post('/', async (req, res, next) => {
     const db = getDb();
     let conversation = db.conversations.find(
       (candidate) =>
+        !isGroupConversation(candidate) &&
         candidate.participantIds.length === 2 &&
         candidate.participantIds.includes(req.user.id) &&
         candidate.participantIds.includes(other.id) &&
@@ -133,6 +137,224 @@ router.post('/', async (req, res, next) => {
     }
 
     res.status(201).json({ conversation: serializeConversation(conversation, req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Group chats — private family workspace only.
+ * ------------------------------------------------------------------ */
+
+const GROUP_MEMBER_LIMIT = 50;
+
+function cleanGroupTitle(value) {
+  return sanitizeText(value, 40).replace(/\s+/g, ' ').trim();
+}
+
+/** Resolves :id to a group the caller belongs to, or null. */
+function groupFor(req) {
+  const conversation = conversationFor(req.user.id, req.params.id, req.scope);
+  return isGroupConversation(conversation) ? conversation : null;
+}
+
+function newModesFor(participantIds) {
+  const modes = {};
+  for (const participantId of participantIds) {
+    modes[participantId] = { anonymity: false, vanish: false };
+  }
+  return modes;
+}
+
+/**
+ * POST /api/conversations/group { title, usernames }
+ * Creates a named group with the caller and at least two other members.
+ */
+router.post('/group', async (req, res, next) => {
+  try {
+    if (req.scope !== 'private') {
+      return res.status(403).json({
+        error: 'Group chats are only available in the family workspace.',
+      });
+    }
+
+    const title = cleanGroupTitle(req.body?.title);
+    if (title.length < 2) {
+      return res.status(400).json({ error: 'Give the group a name of at least 2 characters.' });
+    }
+
+    const requested = Array.isArray(req.body?.usernames) ? req.body.usernames : [];
+    const members = [];
+    for (const raw of requested.slice(0, GROUP_MEMBER_LIMIT)) {
+      const username = String(raw || '').trim().toLowerCase();
+      if (!username) continue;
+
+      const member = findUserByUsername(username, req.scope);
+      if (!member) {
+        return res.status(404).json({ error: `No account found with the username @${username}.` });
+      }
+      if (member.id === req.user.id || members.some((entry) => entry.id === member.id)) continue;
+      members.push(member);
+    }
+
+    if (members.length < 2) {
+      return res.status(400).json({ error: 'Pick at least two people for the group.' });
+    }
+
+    const now = new Date().toISOString();
+    const participantIds = [req.user.id, ...members.map((member) => member.id)];
+    const conversation = {
+      id: crypto.randomUUID(),
+      kind: 'group',
+      title,
+      createdBy: req.user.id,
+      participantIds,
+      scope: req.scope,
+      createdAt: now,
+      updatedAt: now,
+      modes: newModesFor(participantIds),
+      reads: { [req.user.id]: now },
+    };
+
+    getDb().conversations.push(conversation);
+    await persistConversation(conversation);
+    broadcastConversationRefresh(req.app.locals.io, conversation);
+
+    res.status(201).json({ conversation: serializeConversation(conversation, req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** PATCH /api/conversations/:id/group { title } — creator renames the group. */
+router.patch('/:id/group', async (req, res, next) => {
+  try {
+    const conversation = groupFor(req);
+    if (!conversation) return res.status(404).json({ error: 'Group not found.' });
+    if (conversation.createdBy !== req.user.id) {
+      return res.status(403).json({ error: 'Only the group creator can rename it.' });
+    }
+
+    const title = cleanGroupTitle(req.body?.title);
+    if (title.length < 2) {
+      return res.status(400).json({ error: 'Give the group a name of at least 2 characters.' });
+    }
+
+    conversation.title = title;
+    await persistConversation(conversation);
+    broadcastConversationRefresh(req.app.locals.io, conversation);
+
+    res.json({ conversation: serializeConversation(conversation, req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/conversations/:id/members { username } — creator adds a member. */
+router.post('/:id/members', async (req, res, next) => {
+  try {
+    const conversation = groupFor(req);
+    if (!conversation) return res.status(404).json({ error: 'Group not found.' });
+    if (conversation.createdBy !== req.user.id) {
+      return res.status(403).json({ error: 'Only the group creator can add members.' });
+    }
+
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    const member = findUserByUsername(username, req.scope);
+    if (!member) {
+      return res.status(404).json({ error: 'No account found with that username.' });
+    }
+    if (conversation.participantIds.includes(member.id)) {
+      return res.status(409).json({ error: 'That person is already in this group.' });
+    }
+    if (conversation.participantIds.length >= GROUP_MEMBER_LIMIT) {
+      return res.status(400).json({ error: 'This group is full.' });
+    }
+
+    conversation.participantIds.push(member.id);
+    conversation.modes = conversation.modes || {};
+    conversation.modes[member.id] = { anonymity: false, vanish: false };
+    conversation.reads = conversation.reads || {};
+    conversation.reads[member.id] = new Date().toISOString();
+    await persistConversation(conversation);
+
+    broadcastConversationRefresh(req.app.locals.io, conversation);
+    res.json({ conversation: serializeConversation(conversation, req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** DELETE /api/conversations/:id/members/:userId — creator removes a member. */
+router.delete('/:id/members/:userId', async (req, res, next) => {
+  try {
+    const conversation = groupFor(req);
+    if (!conversation) return res.status(404).json({ error: 'Group not found.' });
+    if (conversation.createdBy !== req.user.id) {
+      return res.status(403).json({ error: 'Only the group creator can remove members.' });
+    }
+
+    const targetId = req.params.userId;
+    if (!conversation.participantIds.includes(targetId)) {
+      return res.status(404).json({ error: 'That person is not in this group.' });
+    }
+    if (targetId === conversation.createdBy) {
+      return res.status(400).json({ error: 'The group creator cannot be removed.' });
+    }
+
+    conversation.participantIds = conversation.participantIds.filter((id) => id !== targetId);
+    if (conversation.modes) delete conversation.modes[targetId];
+    if (conversation.reads) delete conversation.reads[targetId];
+    if (conversation.clearedAt) delete conversation.clearedAt[targetId];
+    if (conversation.locks) delete conversation.locks[targetId];
+    await persistConversation(conversation);
+
+    broadcastConversationRemoved(req.app.locals.io, conversation, targetId);
+    broadcastConversationRefresh(req.app.locals.io, conversation);
+    res.json({ ok: true, participantIds: conversation.participantIds });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/conversations/:id/leave — leave a group you were added to. */
+router.post('/:id/leave', async (req, res, next) => {
+  try {
+    const conversation = groupFor(req);
+    if (!conversation) return res.status(404).json({ error: 'Group not found.' });
+
+    const remaining = conversation.participantIds.filter((id) => id !== req.user.id);
+    conversation.participantIds = remaining;
+    if (conversation.modes) delete conversation.modes[req.user.id];
+    if (conversation.reads) delete conversation.reads[req.user.id];
+    if (conversation.clearedAt) delete conversation.clearedAt[req.user.id];
+    if (conversation.locks) delete conversation.locks[req.user.id];
+
+    broadcastConversationRemoved(req.app.locals.io, conversation, req.user.id);
+
+    if (remaining.length === 0) {
+      // Nobody left: drop the thread and its messages instead of leaving an
+      // unreachable conversation behind.
+      const db = getDb();
+      const ids = db.messages
+        .filter((message) => message.conversationId === conversation.id)
+        .map((message) => message.id);
+      db.conversations = db.conversations.filter((entry) => entry.id !== conversation.id);
+      if (ids.length > 0) {
+        db.messages = db.messages.filter((message) => message.conversationId !== conversation.id);
+        await deleteMessagesByIds(ids);
+      }
+      await deleteConversation(conversation.id);
+      return res.json({ ok: true });
+    }
+
+    if (conversation.createdBy === req.user.id) {
+      conversation.createdBy = remaining[0];
+    }
+    await persistConversation(conversation);
+    broadcastConversationRefresh(req.app.locals.io, conversation);
+
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }

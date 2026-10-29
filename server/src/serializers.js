@@ -1,4 +1,4 @@
-import { findUserById, lastMessageFor, visibleMessagesFor } from './db.js';
+import { findUserById, isGroupConversation, lastMessageFor, visibleMessagesFor } from './db.js';
 import { isOnline } from './presence.js';
 
 const ANONYMOUS_IDENTITY = {
@@ -66,16 +66,24 @@ export function unreadCount(conversation, viewerId) {
 
 export function serializeConversation(conversation, viewerId) {
   const viewer = findUserById(viewerId);
-  const otherId = conversation.participantIds.find((participantId) => participantId !== viewerId);
+  const group = isGroupConversation(conversation);
+  // A group has no single "other" participant; the client shows the group title.
+  const otherId = group
+    ? null
+    : conversation.participantIds.find((participantId) => participantId !== viewerId);
   const locked = !!conversation.locks?.[viewerId];
   const last = locked ? null : lastMessageFor(conversation.id, viewerId, conversation);
 
   return {
     id: conversation.id,
-    participants: conversation.participantIds.map((participantId) =>
-      publicUser(findUserById(participantId), viewer),
-    ),
-    other: publicUser(findUserById(otherId), viewer),
+    kind: group ? 'group' : 'direct',
+    title: group ? conversation.title || 'Group chat' : null,
+    createdBy: group ? conversation.createdBy || null : null,
+    memberCount: conversation.participantIds.length,
+    participants: conversation.participantIds
+      .map((participantId) => publicUser(findUserById(participantId), viewer))
+      .filter(Boolean),
+    other: group ? null : publicUser(findUserById(otherId), viewer),
     lastMessage: serializeMessage(last, viewerId),
     unreadCount: unreadCount(conversation, viewerId),
     modes: conversation.modes?.[viewerId] || { anonymity: false, vanish: false },

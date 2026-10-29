@@ -1,7 +1,8 @@
 'use client';
 
 import { FileText, Flame, Image as ImageIcon, Lock, Mic, Pin, Star, Video } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, GroupAvatar } from '@/components/ui/Avatar';
+import { conversationName, isGroupConversation } from '@/lib/conversations';
 import { formatSnippetTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Conversation, Message } from '@/lib/types';
@@ -48,14 +49,24 @@ export function ConversationRow({
   onSelect,
 }: ConversationRowProps) {
   const { other, lastMessage, unreadCount } = conversation;
+  const group = isGroupConversation(conversation);
+  const name = conversationName(conversation);
   const unread = unreadCount > 0;
   const isMine = lastMessage?.senderId === meId;
   const preview = conversation.locked
     ? 'Locked chat'
     : lastMessage
       ? messagePreview(lastMessage)
-      : 'No messages yet';
+      : group
+        ? `${conversation.memberCount} members · no messages yet`
+        : 'No messages yet';
   const draftText = draft?.trim();
+  const senderPrefix =
+    !lastMessage || isMine
+      ? 'You: '
+      : group && !lastMessage.anonymous
+        ? `${lastMessage.sender.displayName}: `
+        : '';
 
   return (
     <button
@@ -66,13 +77,17 @@ export function ConversationRow({
         active ? 'bg-panel-2' : 'hover:bg-panel-2/70',
       )}
       aria-current={active ? 'true' : undefined}
-      aria-label={`Open conversation with ${other.displayName}${unread ? `, ${unreadCount} unread` : ''}`}
+      aria-label={`Open ${group ? 'group' : 'conversation with'} ${name}${unread ? `, ${unreadCount} unread` : ''}`}
     >
       {active && (
         <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-accent" aria-hidden="true" />
       )}
 
-      <Avatar user={other} size="lg" online={online} />
+      {group || !other ? (
+        <GroupAvatar size="lg" label={name} />
+      ) : (
+        <Avatar user={other} size="lg" online={online} />
+      )}
 
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
@@ -82,7 +97,7 @@ export function ConversationRow({
               unread ? 'font-semibold' : 'font-medium',
             )}
           >
-            {other.displayName}
+            {name}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-faint">
             {pinned && <Pin size={10} className="text-faint" aria-label="Pinned" />}
@@ -113,7 +128,7 @@ export function ConversationRow({
                   unread ? 'font-medium text-ink/75' : 'text-muted',
                 )}
               >
-                {isMine && lastMessage ? 'You: ' : ''}
+                {lastMessage ? senderPrefix : ''}
                 {preview}
               </span>
             </>

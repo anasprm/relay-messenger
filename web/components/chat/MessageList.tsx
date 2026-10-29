@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Download, Lock, MessagesSquare, RefreshCw, TriangleAlert } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, GroupAvatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { mediaUrl } from '@/lib/api';
 import { formatBytes, formatDayLabel, isSameDay } from '@/lib/format';
@@ -22,6 +22,7 @@ interface MessageListProps {
   messages: Message[];
   me: User;
   other: User | null;
+  isGroup?: boolean;
   loading: boolean;
   typing: boolean;
   error?: string | null;
@@ -50,6 +51,7 @@ export function MessageList({
   messages,
   me,
   other,
+  isGroup = false,
   loading,
   typing,
   error,
@@ -203,10 +205,16 @@ export function MessageList({
             </span>
             <div>
               <h3 className="text-[14px] font-semibold text-ink">
-                {other ? `Say hello to ${other.displayName}` : 'No messages yet'}
+                {other
+                  ? `Say hello to ${other.displayName}`
+                  : isGroup
+                    ? 'Start the group conversation'
+                    : 'No messages yet'}
               </h3>
               <p className="mx-auto mt-1.5 max-w-xs text-[11.5px] leading-relaxed text-muted">
-                Messages, voice notes, and files are delivered instantly over your workspace relay.
+                {isGroup
+                  ? 'Everyone in this group sees these messages instantly over your workspace relay.'
+                  : 'Messages, voice notes, and files are delivered instantly over your workspace relay.'}
               </p>
             </div>
             <p className="flex items-center gap-1.5 rounded-full border border-line bg-panel/80 px-3 py-1 text-[10px] text-faint backdrop-blur">
@@ -240,9 +248,9 @@ export function MessageList({
               </div>
             ))}
 
-            {typing && other && (
+            {typing && (other || isGroup) && (
               <div className="mt-3 flex items-end gap-2">
-                <Avatar user={other} size="sm" />
+                {other ? <Avatar user={other} size="sm" /> : <GroupAvatar size="sm" />}
                 <div className="flex h-9 items-center gap-1 rounded-[10px] rounded-tl-[2px] bg-bubble px-3.5 shadow-sm">
                   <span className="h-1 w-1 animate-blink rounded-full bg-faint" />
                   <span

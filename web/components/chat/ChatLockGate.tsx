@@ -2,17 +2,20 @@
 
 import { useState } from 'react';
 import { Loader2, Lock, ShieldCheck } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, GroupAvatar } from '@/components/ui/Avatar';
 import type { User } from '@/lib/types';
 
 interface ChatLockGateProps {
-  other: User;
+  /** Contact name, or the group title. */
+  title: string;
+  /** The contact for a direct thread; null for a group. */
+  user?: User | null;
   online: boolean;
   onUnlock: (pin: string) => Promise<string | null>;
 }
 
 /** Inline gate shown in place of a locked conversation's messages. */
-export function ChatLockGate({ other, online, onUnlock }: ChatLockGateProps) {
+export function ChatLockGate({ title, user, online, onUnlock }: ChatLockGateProps) {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +40,11 @@ export function ChatLockGate({ other, online, onUnlock }: ChatLockGateProps) {
         className="w-full max-w-sm rounded-2xl border border-line bg-elevated p-6 text-center shadow-[0_24px_60px_-30px_rgba(15,23,42,0.45)]"
       >
         <div className="relative mx-auto w-fit">
-          <Avatar user={other} size="xl" online={online} />
+          {user ? (
+            <Avatar user={user} size="xl" online={online} />
+          ) : (
+            <GroupAvatar size="xl" label={title} />
+          )}
           <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-elevated bg-accent text-accent-ink">
             <Lock size={13} />
           </span>
@@ -47,7 +54,7 @@ export function ChatLockGate({ other, online, onUnlock }: ChatLockGateProps) {
           This chat is locked
         </h2>
         <p className="mt-1 text-[12px] leading-relaxed text-muted">
-          Enter your PIN to open the conversation with {other.displayName}.
+          {user ? `Enter your PIN to open your chat with ${title}.` : `Enter your PIN to open ${title}.`}
         </p>
 
         <label htmlFor="chat-lock-pin" className="sr-only">

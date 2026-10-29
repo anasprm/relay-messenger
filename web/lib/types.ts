@@ -46,10 +46,18 @@ export interface Modes {
   vanish: boolean;
 }
 
+export type ConversationKind = 'direct' | 'group';
+
 export interface Conversation {
   id: string;
+  kind: ConversationKind;
+  /** Group name; null for direct threads. */
+  title: string | null;
+  /** Who created the group (and may rename/add/remove); null for direct threads. */
+  createdBy: string | null;
+  memberCount: number;
   participants: User[];
-  other: User;
+  other: User | null;
   lastMessage: Message | null;
   unreadCount: number;
   modes: Modes;

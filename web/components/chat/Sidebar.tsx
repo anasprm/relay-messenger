@@ -8,6 +8,7 @@ import {
   Search,
   Star,
   UserRound,
+  Users,
   Wifi,
   WifiOff,
   X,
@@ -15,6 +16,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar';
 import { Logo } from '@/components/ui/Logo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { conversationName } from '@/lib/conversations';
 import { cn } from '@/lib/utils';
 import type { Conversation, User } from '@/lib/types';
 import { ConversationRow } from './ConversationRow';
@@ -37,6 +39,7 @@ interface SidebarProps {
   onFilterChange: (filter: ConversationFilter) => void;
   onSelect: (id: string) => void;
   onNewChat: (query?: string) => void;
+  onNewGroup?: () => void;
   onProfile: () => void;
   onLogout: () => void;
   className?: string;
@@ -62,6 +65,7 @@ export function Sidebar({
   onFilterChange,
   onSelect,
   onNewChat,
+  onNewGroup,
   onProfile,
   onLogout,
   className,
@@ -99,8 +103,8 @@ export function Sidebar({
     let list = conversations.filter((conversation) => {
       if (!needle) return true;
       return (
-        conversation.other.displayName.toLowerCase().includes(needle) ||
-        conversation.other.username.toLowerCase().includes(needle) ||
+        conversationName(conversation).toLowerCase().includes(needle) ||
+        (conversation.other?.username || '').toLowerCase().includes(needle) ||
         (conversation.lastMessage?.text || '').toLowerCase().includes(needle) ||
         (conversation.lastMessage?.attachment?.name || '').toLowerCase().includes(needle)
       );
@@ -199,6 +203,20 @@ export function Sidebar({
                 <MessageSquarePlus size={15} className="text-muted" />
                 New conversation
               </button>
+              {onNewGroup && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onNewGroup();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                >
+                  <Users size={15} className="text-muted" />
+                  New group chat
+                </button>
+              )}
               <div className="my-1 h-px bg-line" />
               <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5">
                 <span className="text-[12px] font-medium text-ink">Appearance</span>
@@ -342,7 +360,11 @@ export function Sidebar({
                 conversation={conversation}
                 meId={user.id}
                 active={conversation.id === activeId}
-                online={onlineIds.has(conversation.other.id) || conversation.other.online}
+                online={
+                  conversation.other
+                    ? onlineIds.has(conversation.other.id) || conversation.other.online
+                    : false
+                }
                 typing={!!typing[conversation.id]}
                 draft={drafts[conversation.id]}
                 favorite={favorites.has(conversation.id)}

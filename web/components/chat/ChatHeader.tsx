@@ -21,14 +21,17 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, GroupAvatar } from '@/components/ui/Avatar';
+import { conversationName, isGroupConversation } from '@/lib/conversations';
 import { presenceText } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Conversation } from '@/lib/types';
 
 interface ChatHeaderProps {
   conversation: Conversation;
+  meId: string;
   online: boolean;
+  onlineMembers: number;
   typing: boolean;
   connected: boolean;
   focusMode: boolean;
@@ -48,6 +51,7 @@ interface ChatHeaderProps {
   onBack: () => void;
   onClearChat: () => void;
   onRenameContact: () => void;
+  onRenameGroup: () => void;
   locked: boolean;
   onLockChat: () => void;
   onRemoveLock: () => void;
@@ -55,7 +59,9 @@ interface ChatHeaderProps {
 
 export function ChatHeader({
   conversation,
+  meId,
   online,
+  onlineMembers,
   typing,
   connected,
   focusMode,
@@ -75,12 +81,16 @@ export function ChatHeader({
   onBack,
   onClearChat,
   onRenameContact,
+  onRenameGroup,
   locked,
   onLockChat,
   onRemoveLock,
 }: ChatHeaderProps) {
   const { other, modes } = conversation;
-  const peer = { ...other, online };
+  const group = isGroupConversation(conversation);
+  const name = conversationName(conversation);
+  const canRename = group && conversation.createdBy === meId;
+  const peer = other ? { ...other, online } : null;
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -109,9 +119,15 @@ export function ChatHeader({
 
   const status = typing
     ? 'typing…'
-    : !connected
-      ? 'Reconnecting to relay…'
-      : presenceText(peer);
+    : group
+      ? connected
+        ? `${conversation.memberCount} members${onlineMembers > 0 ? ` · ${onlineMembers} online` : ''}`
+        : 'Reconnecting to relay…'
+      : !connected
+        ? 'Reconnecting to relay…'
+        : peer
+          ? presenceText(peer)
+          : 'Offline';
 
   return (
     <header className="shrink-0 border-b border-line bg-panel">
@@ -125,12 +141,16 @@ export function ChatHeader({
           <ChevronLeft size={20} />
         </button>
 
-        <Avatar user={peer} size="md" online={online} />
+        {group || !peer ? (
+          <GroupAvatar size="md" label={name} />
+        ) : (
+          <Avatar user={peer} size="md" online={online} />
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
             <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink sm:text-[14.5px]">
-              {other.displayName}
+              {name}
             </h1>
             {modes.anonymity && (
               <span
@@ -182,24 +202,28 @@ export function ChatHeader({
             <Search size={17} />
           </button>
 
-          <button
-            type="button"
-            onClick={onStartAudio}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
-            aria-label="Start audio call"
-            title="Audio call"
-          >
-            <Phone size={17} />
-          </button>
-          <button
-            type="button"
-            onClick={onStartVideo}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
-            aria-label="Start video call"
-            title="Video call"
-          >
-            <Video size={18} />
-          </button>
+          {!group && (
+            <>
+              <button
+                type="button"
+                onClick={onStartAudio}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
+                aria-label="Start audio call"
+                title="Audio call"
+              >
+                <Phone size={17} />
+              </button>
+              <button
+                type="button"
+                onClick={onStartVideo}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-accent sm:h-9 sm:w-9"
+                aria-label="Start video call"
+                title="Video call"
+              >
+                <Video size={18} />
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -249,18 +273,34 @@ export function ChatHeader({
                 aria-label="Conversation actions"
                 className="absolute right-0 top-full z-50 mt-1.5 w-52 overflow-hidden rounded-xl border border-line bg-elevated p-1 shadow-[0_18px_50px_-18px_rgba(15,23,42,0.5)] animate-pop-in"
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onRenameContact();
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
-                >
-                  <Pencil size={14} className="text-muted" />
-                  Rename contact
-                </button>
+                {!group && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRenameContact();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <Pencil size={14} className="text-muted" />
+                    Rename contact
+                  </button>
+                )}
+                {canRename && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRenameGroup();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-ink transition-colors hover:bg-panel-2"
+                  >
+                    <Pencil size={14} className="text-muted" />
+                    Rename group
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"

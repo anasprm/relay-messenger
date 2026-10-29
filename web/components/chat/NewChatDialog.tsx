@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Loader2, Search, UserRound } from 'lucide-react';
+import { ArrowRight, Loader2, Search, UserRound, Users } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { api } from '@/lib/api';
@@ -16,9 +16,10 @@ interface NewChatDialogProps {
   initialQuery?: string;
   onClose: () => void;
   onStart: (username: string) => Promise<void>;
+  onNewGroup?: () => void;
 }
 
-export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatDialogProps) {
+export function NewChatDialog({ open, initialQuery, onClose, onStart, onNewGroup }: NewChatDialogProps) {
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [searching, setSearching] = useState(false);
@@ -203,6 +204,28 @@ export function NewChatDialog({ open, initialQuery, onClose, onStart }: NewChatD
             </button>
           )}
         </div>
+
+        {privateSite && onNewGroup && (
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onNewGroup();
+            }}
+            className="mt-3 flex w-full items-center gap-3 rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-left transition-colors hover:border-accent/40 hover:bg-panel"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent">
+              <Users size={14} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[11.5px] font-medium text-ink">New group chat</span>
+              <span className="block text-[10px] text-muted">
+                Bring several family members into one thread.
+              </span>
+            </span>
+            <ArrowRight size={13} className="text-faint" />
+          </button>
+        )}
 
         <p className="mt-4 border-t border-line pt-3 text-[10px] leading-relaxed text-faint">
           {privateSite

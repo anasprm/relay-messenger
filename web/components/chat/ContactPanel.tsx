@@ -1,21 +1,26 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
   FileText,
   Ghost,
   Image as ImageIcon,
+  LogOut,
   Mic,
   Phone,
   Pin,
   ShieldCheck,
   Star,
+  UserMinus,
+  UserPlus,
+  Users,
   Video,
   X,
 } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, GroupAvatar } from '@/components/ui/Avatar';
 import { mediaUrl } from '@/lib/api';
+import { conversationName, isGroupConversation, onlineMemberCount } from '@/lib/conversations';
 import { formatBytes, formatDuration, presenceText } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Attachment, Conversation, Message } from '@/lib/types';
@@ -23,7 +28,9 @@ import type { Attachment, Conversation, Message } from '@/lib/types';
 interface ContactPanelProps {
   conversation: Conversation;
   messages: Message[];
+  meId: string;
   online: boolean;
+  onlineIds: Set<string>;
   typing: boolean;
   favorite: boolean;
   pinned: boolean;
@@ -35,6 +42,9 @@ interface ContactPanelProps {
   onToggleVanish: () => void;
   onToggleFavorite: () => void;
   onTogglePin: () => void;
+  onAddMember: (username: string) => Promise<string | null>;
+  onRemoveMember: (userId: string) => Promise<void>;
+  onLeaveGroup: () => Promise<void>;
 }
 
 function ToggleRow({
@@ -102,7 +112,9 @@ function attachmentIcon(attachment: Attachment) {
 export function ContactPanel({
   conversation,
   messages,
+  meId,
   online,
+  onlineIds,
   typing,
   favorite,
   pinned,
@@ -114,10 +126,41 @@ export function ContactPanel({
   onToggleVanish,
   onToggleFavorite,
   onTogglePin,
+  onAddMember,
+  onRemoveMember,
+  onLeaveGroup,
 }: ContactPanelProps) {
   const { other, modes } = conversation;
-  const peer = { ...other, online };
+  const group = isGroupConversation(conversation);
+  const name = conversationName(conversation);
+  const peer = other ? { ...other, online } : null;
+  const isCreator = group && conversation.createdBy === meId;
+  const onlineCount = group ? onlineMemberCount(conversation, onlineIds) : 0;
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberBusy, setMemberBusy] = useState(false);
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [leaveBusy, setLeaveBusy] = useState(false);
+
+  async function addMember(event: React.FormEvent) {
+    event.preventDefault();
+    const username = memberQuery.trim().toLowerCase();
+    if (!username || memberBusy) return;
+
+    setMemberBusy(true);
+    setMemberError(null);
+    const error = await onAddMember(username);
+    if (error) setMemberError(error);
+    else setMemberQuery('');
+    setMemberBusy(false);
+  }
+
+  async function leaveGroup() {
+    if (leaveBusy) return;
+    setLeaveBusy(true);
+    await onLeaveGroup();
+    setLeaveBusy(false);
+  }
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -170,13 +213,15 @@ export function ContactPanel({
       )}
     >
       <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-line px-4">
-        <h2 className="text-[14px] font-semibold text-ink">Contact info</h2>
+        <h2 className="text-[14px] font-semibold text-ink">
+          {group ? 'Group info' : 'Contact info'}
+        </h2>
         <button
           ref={closeRef}
           type="button"
           onClick={onClose}
           className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-panel-2 hover:text-ink"
-          aria-label="Close contact details"
+          aria-label="Close conversation details"
         >
           <X size={18} />
         </button>
@@ -184,39 +229,144 @@ export function ContactPanel({
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col items-center px-5 pb-5 pt-7 text-center">
-          <Avatar user={peer} size="2xl" online={online} />
+          {group || !peer ? (
+            <GroupAvatar size="2xl" label={name} />
+          ) : (
+            <Avatar user={peer} size="2xl" online={online} />
+          )}
           <h3 className="mt-3 max-w-full truncate text-[17px] font-semibold tracking-[-0.02em] text-ink">
-            {other.displayName}
+            {name}
           </h3>
-          <p className="mt-0.5 text-[11.5px] text-faint">@{other.username}</p>
+          <p className="mt-0.5 text-[11.5px] text-faint">
+            {group ? `${conversation.memberCount} members` : `@${peer?.username || ''}`}
+          </p>
           <p
             className={cn(
               'mt-1.5 text-[11.5px]',
               typing ? 'text-accent' : online ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted',
             )}
           >
-            {typing ? 'typing…' : presenceText(peer)}
+            {typing
+              ? 'typing…'
+              : group
+                ? `${onlineCount} online now`
+                : peer
+                  ? presenceText(peer)
+                  : 'Offline'}
           </p>
 
-          <div className="mt-4 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onStartAudio}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
-            >
-              <Phone size={14} />
-              Audio
-            </button>
-            <button
-              type="button"
-              onClick={onStartVideo}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
-            >
-              <Video size={15} />
-              Video
-            </button>
-          </div>
+          {!group && (
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onStartAudio}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
+              >
+                <Phone size={14} />
+                Audio
+              </button>
+              <button
+                type="button"
+                onClick={onStartVideo}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-[11.5px] font-semibold text-accent transition-colors hover:bg-accent/15"
+              >
+                <Video size={15} />
+                Video
+              </button>
+            </div>
+          )}
         </div>
+
+        {group && (
+          <section className="border-t border-line px-2 py-3" aria-labelledby="members-heading">
+            <h4
+              id="members-heading"
+              className="px-2.5 pb-1 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-faint"
+            >
+              Members · {conversation.memberCount}
+            </h4>
+
+            <div className="space-y-0.5">
+              {conversation.participants.map((member) => {
+                const isMe = member.id === meId;
+                const removable = isCreator && !isMe;
+                return (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 transition-colors hover:bg-panel-2"
+                  >
+                    <Avatar
+                      user={member}
+                      size="sm"
+                      online={onlineIds.has(member.id) || member.online}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-medium text-ink">
+                        {member.displayName}
+                        {isMe && <span className="ml-1 text-[10px] font-normal text-faint">(you)</span>}
+                      </span>
+                      <span className="block truncate text-[10px] text-faint">
+                        @{member.username}
+                        {member.id === conversation.createdBy ? ' · creator' : ''}
+                      </span>
+                    </span>
+                    {removable && (
+                      <button
+                        type="button"
+                        onClick={() => void onRemoveMember(member.id)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-danger/10 hover:text-danger"
+                        aria-label={`Remove ${member.displayName} from the group`}
+                        title="Remove from group"
+                      >
+                        <UserMinus size={13} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {isCreator && (
+              <form onSubmit={(event) => void addMember(event)} className="mt-2 px-2.5">
+                <label htmlFor="group-add-member" className="sr-only">
+                  Add a member by username
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative min-w-0 flex-1">
+                    <UserPlus
+                      size={13}
+                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint"
+                    />
+                    <input
+                      id="group-add-member"
+                      value={memberQuery}
+                      onChange={(event) => {
+                        setMemberQuery(event.target.value);
+                        setMemberError(null);
+                      }}
+                      placeholder="username"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      className="h-8 w-full rounded-lg border border-line bg-panel-2 pl-8 pr-2 text-[11.5px] text-ink placeholder:text-faint transition-colors focus:border-accent/60 focus:bg-panel focus:outline-none focus:ring-2 focus:ring-accent/10"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={memberBusy || !memberQuery.trim()}
+                    className="h-8 shrink-0 rounded-lg bg-accent px-3 text-[11px] font-semibold text-accent-ink transition-colors hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+                {memberError && (
+                  <p role="alert" className="mt-1.5 text-[10.5px] font-medium text-danger">
+                    {memberError}
+                  </p>
+                )}
+              </form>
+            )}
+          </section>
+        )}
 
         <section className="border-t border-line px-2 py-3" aria-labelledby="privacy-heading">
           <h4
@@ -423,6 +573,25 @@ export function ContactPanel({
             </div>
           )}
         </section>
+
+        {group && (
+          <section className="border-t border-line px-4 py-4">
+            <button
+              type="button"
+              onClick={() => void leaveGroup()}
+              disabled={leaveBusy}
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-danger/30 text-[11.5px] font-semibold text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+            >
+              <LogOut size={14} />
+              {leaveBusy ? 'Leaving…' : 'Leave group'}
+            </button>
+            <p className="mt-2 text-center text-[9.5px] leading-relaxed text-faint">
+              {isCreator && conversation.memberCount > 1
+                ? 'Leaving hands the group to the next member.'
+                : 'You will stop receiving messages from this group.'}
+            </p>
+          </section>
+        )}
       </div>
     </aside>
   );

@@ -212,6 +212,23 @@ export async function deleteLaunchCode(id) {
   }
 }
 
+export async function deleteConversation(id) {
+  const db = getDb();
+  db.conversations = db.conversations.filter((conversation) => conversation.id !== id);
+  saveDb();
+
+  const firestore = getFirestoreDb();
+  if (!firestore) return;
+
+  try {
+    await firestore.collection('conversations').doc(id).delete();
+    lastFirestoreError = null;
+  } catch (error) {
+    lastFirestoreError = error;
+    console.warn(`[db] Firestore delete failed for conversations/${id}: ${error.message}`);
+  }
+}
+
 export async function deleteMessagesByIds(ids) {
   if (!ids?.length) return;
   saveDb();
@@ -257,6 +274,14 @@ export function findUserByUsername(username, scope) {
 
 export function findConversation(id) {
   return getDb().conversations.find((conversation) => conversation.id === id) || null;
+}
+
+/**
+ * Direct threads predate groups and carry no `kind`, so only an explicit
+ * `kind: 'group'` marks a group. That keeps old conversations loadable.
+ */
+export function isGroupConversation(conversation) {
+  return conversation?.kind === 'group';
 }
 
 export function conversationFor(userId, conversationId, scope) {

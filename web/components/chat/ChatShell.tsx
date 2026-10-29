@@ -14,16 +14,20 @@ import { ChatLockDialog } from './ChatLockDialog';
 import { ContactAliasDialog } from './ContactAliasDialog';
 import { ChatLockGate } from './ChatLockGate';
 import { NewChatDialog } from './NewChatDialog';
+import { NewGroupDialog } from './NewGroupDialog';
+import { GroupRenameDialog } from './GroupRenameDialog';
 import { ProfileDialog } from './ProfileDialog';
 import { Sidebar, type ConversationFilter } from './Sidebar';
 import { WelcomePane } from './WelcomePane';
 import { Splash } from '@/components/ui/Splash';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { API_URL, api } from '@/lib/api';
+import { conversationName, isGroupConversation } from '@/lib/conversations';
 import { errorMessage, useAuth } from '@/lib/AuthProvider';
 import { readAllDrafts } from '@/lib/drafts';
 import { favoritesKey, pinnedKey, readIdSet, writeIdSet } from '@/lib/localSets';
 import { createSocket } from '@/lib/socket';
+import { isPrivateSite } from '@/lib/site';
 import { useToast } from '@/lib/ToastProvider';
 import { useCall } from '@/lib/useCall';
 import { useMediaPermission } from '@/lib/useMediaPermission';
@@ -57,6 +61,10 @@ export function ChatShell() {
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newChatQuery, setNewChatQuery] = useState('');
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [groupRenameOpen, setGroupRenameOpen] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [groupError, setGroupError] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
 
   const [filter, setFilter] = useState<ConversationFilter>('all');
@@ -268,7 +276,13 @@ export function ChatShell() {
       setConversations((previous) =>
         previous.map((conversation) => ({
           ...conversation,
-          other: { ...conversation.other, online: ids.has(conversation.other.id) },
+          other: conversation.other
+            ? { ...conversation.other, online: ids.has(conversation.other.id) }
+            : null,
+          participants: conversation.participants.map((member) => ({
+            ...member,
+            online: ids.has(member.id),
+          })),
         })),
       );
     };
@@ -289,18 +303,22 @@ export function ChatShell() {
         return next;
       });
       setConversations((previous) =>
-        previous.map((conversation) =>
-          conversation.other.id === userId
-            ? {
-                ...conversation,
-                other: {
+        previous.map((conversation) => ({
+          ...conversation,
+          other:
+            conversation.other && conversation.other.id === userId
+              ? {
                   ...conversation.other,
                   online,
                   lastSeen: lastSeen || conversation.other.lastSeen,
-                },
-              }
-            : conversation,
-        ),
+                }
+              : conversation.other,
+          participants: conversation.participants.map((member) =>
+            member.id === userId
+              ? { ...member, online, lastSeen: lastSeen || member.lastSeen }
+              : member,
+          ),
+        })),
       );
     };
 
@@ -413,6 +431,21 @@ export function ChatShell() {
       void refreshConversations();
     };
 
+    /** A group vanished: removed by the creator, or left by this account. */
+    const onConversationRemoved = ({ conversationId }: { conversationId: string }) => {
+      setConversations((previous) =>
+        previous.filter((conversation) => conversation.id !== conversationId),
+      );
+      if (activeIdRef.current === conversationId) {
+        activeIdRef.current = null;
+        setActiveId(null);
+        setMessages([]);
+        setInfoOpen(false);
+        setSearchOpen(false);
+        setSearchQuery('');
+      }
+    };
+
     client.on('connect', onConnect);
     client.on('disconnect', onDisconnect);
     client.on('connect_error', onConnectError);
@@ -425,6 +458,7 @@ export function ChatShell() {
     client.on('conversation:modes', onModes);
     client.on('typing:update', onTyping);
     client.on('conversation:refresh', onConversationRefresh);
+    client.on('conversation:removed', onConversationRemoved);
 
     return () => {
       client.off('connect', onConnect);
@@ -439,6 +473,7 @@ export function ChatShell() {
       client.off('conversation:modes', onModes);
       client.off('typing:update', onTyping);
       client.off('conversation:refresh', onConversationRefresh);
+      client.off('conversation:removed', onConversationRemoved);
       client.disconnect();
       if (socketRef.current === client) socketRef.current = null;
       setSocket(null);
@@ -485,10 +520,10 @@ export function ChatShell() {
                   ...conversation,
                   ...response.conversation,
                   unreadCount: 0,
-                  other: {
-                    ...response.conversation.other,
-                    online: conversation.other.online,
-                  },
+                  other:
+                    response.conversation.other && conversation.other
+                      ? { ...response.conversation.other, online: conversation.other.online }
+                      : response.conversation.other,
                 }
               : conversation,
           ),
@@ -544,7 +579,6 @@ export function ChatShell() {
     if (!conversation || !client) return;
     client.emit('typing', {
       conversationId: conversation.id,
-      to: conversation.other.id,
       typing: isTyping,
     });
   }, []);
@@ -581,7 +615,6 @@ export function ChatShell() {
         );
         socketRef.current?.emit('typing', {
           conversationId: conversation.id,
-          to: conversation.other.id,
           typing: false,
         });
         return true;
@@ -729,7 +762,7 @@ export function ChatShell() {
   const saveAlias = useCallback(
     async (name: string) => {
       const conversation = activeConversationRef.current;
-      if (!conversation) return;
+      if (!conversation || !conversation.other) return;
 
       setAliasBusy(true);
       setAliasError(null);
@@ -852,6 +885,104 @@ export function ChatShell() {
     setSearchOpen(false);
     setSearchQuery('');
   }, []);
+
+  const createGroup = useCallback(async (title: string, usernames: string[]) => {
+    const response = await api.post<{ conversation: Conversation }>(
+      '/api/conversations/group',
+      { title, usernames },
+    );
+    setConversations((previous) =>
+      sortByActivity([
+        ...previous.filter((conversation) => conversation.id !== response.conversation.id),
+        response.conversation,
+      ]),
+    );
+    setActiveId(response.conversation.id);
+    setMobileThreadOpen(true);
+    setFilter('all');
+    setInfoOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+
+  const renameGroup = useCallback(
+    async (title: string) => {
+      const conversation = activeConversationRef.current;
+      if (!conversation || groupBusy) return;
+
+      setGroupBusy(true);
+      setGroupError(null);
+      try {
+        const response = await api.patch<{ conversation: Conversation }>(
+          `/api/conversations/${conversation.id}/group`,
+          { title },
+        );
+        setConversations((previous) =>
+          previous.map((entry) =>
+            entry.id === response.conversation.id ? response.conversation : entry,
+          ),
+        );
+        setGroupRenameOpen(false);
+      } catch (error) {
+        setGroupError(errorMessage(error));
+      } finally {
+        setGroupBusy(false);
+      }
+    },
+    [groupBusy],
+  );
+
+  const addGroupMember = useCallback(async (username: string): Promise<string | null> => {
+    const conversation = activeConversationRef.current;
+    if (!conversation) return 'Open the group first.';
+
+    try {
+      const response = await api.post<{ conversation: Conversation }>(
+        `/api/conversations/${conversation.id}/members`,
+        { username },
+      );
+      setConversations((previous) =>
+        previous.map((entry) =>
+          entry.id === response.conversation.id ? response.conversation : entry,
+        ),
+      );
+      return null;
+    } catch (error) {
+      return errorMessage(error);
+    }
+  }, []);
+
+  const removeGroupMember = useCallback(
+    async (userId: string) => {
+      const conversation = activeConversationRef.current;
+      if (!conversation) return;
+
+      try {
+        await api.delete(`/api/conversations/${conversation.id}/members/${userId}`);
+        void refreshConversations();
+      } catch (error) {
+        toast(errorMessage(error), 'error');
+      }
+    },
+    [refreshConversations, toast],
+  );
+
+  const leaveGroup = useCallback(async () => {
+    const conversation = activeConversationRef.current;
+    if (!conversation) return;
+
+    try {
+      await api.post(`/api/conversations/${conversation.id}/leave`);
+      setConversations((previous) => previous.filter((entry) => entry.id !== conversation.id));
+      setActiveId(null);
+      setMessages([]);
+      setInfoOpen(false);
+      setSearchOpen(false);
+      setSearchQuery('');
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    }
+  }, [toast]);
 
   const selectConversation = useCallback((id: string) => {
     setActiveId(id);
@@ -987,9 +1118,14 @@ export function ChatShell() {
 
   if (loading || !user) return <Splash label="Preparing your workspace" />;
 
-  const peerOnline = activeConversation
+  const peerOnline = activeConversation?.other
     ? onlineIds.has(activeConversation.other.id) || activeConversation.other.online
     : false;
+  const onlineMembers = activeConversation
+    ? activeConversation.participants.filter(
+        (member) => member.online || onlineIds.has(member.id),
+      ).length
+    : 0;
   const activeTyping = activeConversation ? !!typing[activeConversation.id] : false;
 
   return (
@@ -1016,6 +1152,7 @@ export function ChatShell() {
           onFilterChange={setFilter}
           onSelect={selectConversation}
           onNewChat={openNewChat}
+          onNewGroup={isPrivateSite() ? () => setNewGroupOpen(true) : undefined}
           onProfile={() => setProfileOpen(true)}
           onLogout={handleLogout}
           className="w-full"
@@ -1033,7 +1170,9 @@ export function ChatShell() {
             <>
               <ChatHeader
                 conversation={activeConversation}
+                meId={user.id}
                 online={peerOnline}
+                onlineMembers={onlineMembers}
                 typing={activeTyping}
                 connected={connected}
                 focusMode={focusMode}
@@ -1056,6 +1195,10 @@ export function ChatShell() {
                   setAliasError(null);
                   setAliasOpen(true);
                 }}
+                onRenameGroup={() => {
+                  setGroupError(null);
+                  setGroupRenameOpen(true);
+                }}
                 locked={!!activeConversation.locked}
                 onLockChat={() => {
                   setLockError(null);
@@ -1069,7 +1212,8 @@ export function ChatShell() {
 
               {activeLocked ? (
                 <ChatLockGate
-                  other={activeConversation.other}
+                  title={conversationName(activeConversation)}
+                  user={activeConversation.other}
                   online={peerOnline}
                   onUnlock={unlockConversation}
                 />
@@ -1085,6 +1229,7 @@ export function ChatShell() {
                     messages={messages}
                     me={user}
                     other={activeConversation.other}
+                    isGroup={isGroupConversation(activeConversation)}
                     loading={loadingMessages}
                     typing={activeTyping}
                     error={messageError}
@@ -1095,7 +1240,9 @@ export function ChatShell() {
                     onViewOnce={viewOnceMessage}
                     onUnsend={(message) => setConfirmAction({ type: 'unsend', message })}
                   />
-                  {mediaPermission === 'denied' && !mediaNoticeDismissed && (
+                  {!isGroupConversation(activeConversation) &&
+                    mediaPermission === 'denied' &&
+                    !mediaNoticeDismissed && (
                     <CallPermissionNotice
                       checking={checkingMediaPermission}
                       onDismiss={() => setMediaNoticeDismissed(true)}
@@ -1134,7 +1281,9 @@ export function ChatShell() {
             <ContactPanel
               conversation={activeConversation}
               messages={messages}
+              meId={user.id}
               online={peerOnline}
+              onlineIds={onlineIds}
               typing={activeTyping}
               favorite={favorites.has(activeConversation.id)}
               pinned={pinned.has(activeConversation.id)}
@@ -1149,6 +1298,9 @@ export function ChatShell() {
               }
               onToggleFavorite={() => toggleFavorite(activeConversation.id)}
               onTogglePin={() => togglePin(activeConversation.id)}
+              onAddMember={addGroupMember}
+              onRemoveMember={removeGroupMember}
+              onLeaveGroup={leaveGroup}
               className="fixed inset-y-0 right-0 z-[65] w-[min(22rem,100vw)] max-w-full shadow-[0_30px_80px_-30px_rgba(2,6,23,0.65)] xl:static xl:z-auto xl:w-[340px] xl:max-w-none xl:shadow-none"
             />
           </>
@@ -1163,6 +1315,26 @@ export function ChatShell() {
           setNewChatQuery('');
         }}
         onStart={startConversation}
+        onNewGroup={isPrivateSite() ? () => setNewGroupOpen(true) : undefined}
+      />
+
+      <NewGroupDialog
+        open={newGroupOpen}
+        onClose={() => setNewGroupOpen(false)}
+        onCreate={createGroup}
+      />
+
+      <GroupRenameDialog
+        open={groupRenameOpen}
+        currentName={activeConversation ? conversationName(activeConversation) : ''}
+        busy={groupBusy}
+        error={groupError}
+        onClose={() => {
+          if (groupBusy) return;
+          setGroupRenameOpen(false);
+          setGroupError(null);
+        }}
+        onSubmit={(name) => void renameGroup(name)}
       />
 
       <ProfileDialog
@@ -1176,7 +1348,9 @@ export function ChatShell() {
       <ChatLockDialog
         open={!!lockDialog}
         mode={lockDialog || 'set'}
-        otherName={activeConversation?.other.displayName || 'this contact'}
+        otherName={
+          activeConversation ? conversationName(activeConversation) : 'this contact'
+        }
         busy={lockBusy}
         error={lockError}
         onClose={() => {
@@ -1189,9 +1363,12 @@ export function ChatShell() {
 
       <ContactAliasDialog
         open={aliasOpen}
-        otherName={activeConversation?.other.displayName || 'this contact'}
-        username={activeConversation?.other.username || ''}
-        currentName={activeConversation?.other.displayName || ''}
+        otherName={
+          activeConversation?.other?.displayName ||
+          (activeConversation ? conversationName(activeConversation) : 'this contact')
+        }
+        username={activeConversation?.other?.username || ''}
+        currentName={activeConversation?.other?.displayName || ''}
         busy={aliasBusy}
         error={aliasError}
         onClose={() => {
